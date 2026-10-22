@@ -38,7 +38,7 @@ export default async function QualityPage({ searchParams }: { searchParams: Prom
   const now = new Date();
   return (
     <>
-      <PageHeader title="Quality" subtitle="Condition evaluations score each mold against weighted criteria. Approved scores update the passport; low scores raise a work order." actions={ctx.can("quality", "create") && <LinkButton href="/quality/evaluations/new">New evaluation</LinkButton>} />
+      <PageHeader title="Quality" subtitle="Condition assessments rate each mold element on the health scale (5 Excellent … 1 Unacceptable). Approved results update the passport; Poor ratings or reported issues raise a work order, and Unacceptable quarantines the mold." actions={ctx.can("quality", "create") && <LinkButton href="/quality/assess">Start assessment</LinkButton>} />
       <SubTabs tabs={ctx.isSupplier ? QUALITY_TABS.slice(0, 1) : QUALITY_TABS} active="/quality" />
       <FlashFromParams params={sp} />
       <div className="mb-4 flex flex-wrap gap-1">

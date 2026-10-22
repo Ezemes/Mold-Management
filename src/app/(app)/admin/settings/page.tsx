@@ -1,6 +1,7 @@
 import { requireOrg } from "@/lib/auth";
 import { TIMEZONES } from "@/lib/india";
 import { normalizeRules, RULES } from "@/lib/compat.pure";
+import { DEFAULT_CAVITY_COSTS, PROCESSES } from "@/lib/calc.pure";
 import { fmtMoney, fmtNum } from "@/lib/format";
 import { Card, Field, FlashFromParams, Input, PageHeader, Select } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
@@ -13,6 +14,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const ctx = await requireOrg(["settings", "view"]);
   const o = ctx.org;
   const rules = normalizeRules(o.compatRules);
+  const costs = (o.cavityCosts ?? {}) as Record<string, unknown>;
   return (
     <>
       <PageHeader title="Organisation settings" subtitle="Defaults for India: IST, INR, metric units and lakh/crore number grouping." />
@@ -49,6 +51,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <Field label="Tolerance (%)" hint="Allowed gap between counted shots and parts ÷ cavities."><Input name="reconTolerancePct" type="number" min={0} max={100} defaultValue={o.reconTolerancePct} /></Field>
           <Field label="Minimum tolerance (shots)" hint="Small periods are never flagged for less than this."><Input name="reconMinShots" type="number" min={0} defaultValue={o.reconMinShots} /></Field>
           <Field label="Reading window (days)" hint="How close a counter reading must be to a period's start and end."><Input name="reconWindowDays" type="number" min={0} max={31} defaultValue={o.reconWindowDays} /></Field>
+
+          <h2 className="mt-4 text-sm font-semibold sm:col-span-2">Replacement cost per cavity <span className="font-normal text-ink-500">(for “Calculated Replacement Cost” and “Cost Average Refurb”)</span></h2>
+          <Field label="Currency of these costs" hint="Defaults come from the calculated-fields document in USD."><Input name="cavityCostCurrency" defaultValue={o.cavityCostCurrency} maxLength={3} /></Field>
+          <div className="grid grid-cols-2 gap-2 sm:col-span-2 sm:grid-cols-3">
+            {PROCESSES.map((p) => (
+              <Field key={p} label={p} name={`cavityCost.${p}`}>
+                <Input name={`cavityCost.${p}`} inputMode="decimal" defaultValue={typeof costs[p] === "number" ? String(costs[p]) : ""} placeholder={DEFAULT_CAVITY_COSTS[p] == null ? "TBD" : String(DEFAULT_CAVITY_COSTS[p])} />
+              </Field>
+            ))}
+          </div>
           {ctx.can("settings", "edit") && <div className="sm:col-span-2"><SubmitButton>Save settings</SubmitButton></div>}
         </form>
       </Card>

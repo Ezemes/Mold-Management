@@ -6,6 +6,8 @@ import { ASSET_STATUS } from "./assets";
 import { fleetForecast } from "./planning";
 import { actualByCategory, BUDGET_CATEGORIES, type BudgetCategory } from "./planning.pure";
 import { woCost } from "./maintenance";
+import { calculate, CALC_FIELDS, inputFromAsset, type Calc, type CalcKey } from "./calc.pure";
+import { assessmentOutcome, ratingWord, type Answers, type ComponentResult } from "./inspection.pure";
 
 export type Cell = string | number | null;
 export type Report = { title: string; description: string; columns: string[]; rows: Cell[][]; numeric?: number[]; footer?: Cell[] };
@@ -21,6 +23,8 @@ export const REPORTS = {
   budget: { title: "Budget vs actual", description: "This year's budget against completed work-order spend, by category." },
   transit: { title: "Transfers and transit time", description: "Completed transfers in the last 12 months and average days in transit, by route." },
   reconciliation: { title: "Reconciliation exceptions", description: "Production reports whose parts ÷ cavities disagree with the shot counter beyond tolerance." },
+  inspection_summary: { title: "Inspection summary", description: "One row per mold with the columns of the inspection template's Summary sheet." },
+  calculated_fields: { title: "Calculated fields", description: "Lifecycle and capacity calculations for every mold, with the inputs each one still needs." },
   data_quality: { title: "Data quality", description: "Mold passports missing fields needed for life tracking, planning and press compatibility." },
 } as const;
 export type ReportKey = keyof typeof REPORTS;
@@ -117,6 +121,41 @@ export async function buildReport(ctx: Ctx, key: ReportKey, now = new Date()): P
       const d = (x: Date) => x.toISOString().slice(0, 10);
       const rows = xs.map((x) => [x.asset.number, d(x.report.periodStart), d(new Date(x.report.periodEnd.getTime() - 1)), x.report.partNumber || "", x.report.parts, x.expectedShots, x.recordedShots, x.gap, x.gapPct, x.status, x.resolution]);
       return { ...meta, description: `${meta.description} ${xs.filter((x) => x.status === "open").length} open.`, columns: ["Mold", "From", "To", "Part", "Parts", "Expected shots", "Counted shots", "Gap", "Gap %", "Status", "Resolution"], rows, numeric: [4, 5, 6, 7, 8] };
+    }
+    case "inspection_summary": {
+      const molds = await db.asset.findMany({
+        where: { AND: [scope, { assetType: { kind: "mold" }, parentId: null }] },
+        include: { site: { include: { division: true, partner: true } }, meters: true, cavities: { select: { status: true } }, products: true, ownerPartner: true, toolmakerPartner: true, assetType: true, _count: { select: { workOrders: { where: { status: { in: ["open", "in_progress", "on_hold"] } } } } } },
+        orderBy: { number: "asc" },
+      });
+      const latest = await db.conditionEvaluation.findMany({ where: { assetId: { in: molds.map((m) => m.id) } }, orderBy: { evaluatedAt: "desc" }, distinct: ["assetId"] });
+      const d = (x: Date | null | undefined) => (x ? x.toISOString().slice(0, 10) : "");
+      const rows = molds.map((m) => {
+        const c = calculate(inputFromAsset(m, ctx.org), now).lifecycle;
+        const ev = latest.find((e) => e.assetId === m.id);
+        const ans = (ev?.answers ?? {}) as Partial<Answers>;
+        const out = ev ? assessmentOutcome(ev.scores as unknown as ComponentResult[], { qualityIssues: ans.qualityIssues ?? null, operationalIssues: ans.operationalIssues ?? null, spareParts: ans.spareParts ?? null, supplyRisk: ans.supplyRisk ?? null }, ev.score, m.assetType.evalThreshold) : null;
+        const meter = m.meters.find((x) => x.kind === "shots");
+        return [
+          m.id, m.site.division?.name ?? "", m.site.name, m.process, m.status, m.toolNumber, m.number, m.name, m.componentType, d(m.nextEvaluationDate),
+          m.designCavities, m.designCycleTimeS, m.conditionScore != null ? `${m.conditionScore.toFixed(2)} (${ratingWord(Math.round(m.conditionScore))})` : "", m.annualVolume, meter?.lifetimeTotal ?? null,
+          d(m.lastRunDate), d(m.lastRefurbDate), d(c.nextRefurbishment.value), m.refurbsDone, c.refurbsRemaining.value, m._count.workOrders, out ? (out.workOrderRequired ? "Yes" : "No") : "",
+          d(m.buildDate), m.toolmakerPartner?.name ?? "", m.products.map((p) => p.partNumber).join("; "), m.productDrawing, m.brandName, m.platform, m.ownerPartner?.name ?? ctx.org.name,
+        ];
+      });
+      return { ...meta, columns: ["ID", "Division", "Location", "Department", "Status", "Supplier Tool #", "Number", "Description", "Component Type", "Next Evaluation Date", "# Cavities", "Cycle Time", "Condition Rating", "Annual Volume", "Cycle Count", "Last Run Date", "Last Refurbished", "Next Refurbishment", "Refurbs Completed", "Refurbs Remaining", "No. Open Work Orders", "New W/O Req Yes or No", "Date Built", "Built By", "Part Number", "Product Drawing #", "Brand Name", "Platform", "Ownership"], rows, numeric: [10, 11, 13, 14, 18, 19, 20] };
+    }
+    case "calculated_fields": {
+      const molds = await db.asset.findMany({ where: { AND: [scope, { assetType: { kind: "mold" }, parentId: null, status: { notIn: ["retired", "scrapped"] } }] }, include: { site: true, meters: true, cavities: { select: { status: true } } }, orderBy: { number: "asc" } });
+      const keys = Object.keys(CALC_FIELDS) as CalcKey[];
+      const fmt = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : typeof v === "number" ? Math.round(v * 100) / 100 : (v as Cell) ?? null);
+      const rows = molds.map((m) => {
+        const r = calculate(inputFromAsset(m, ctx.org), now);
+        const all = { ...r.lifecycle, ...r.capacity } as Record<CalcKey, Calc<unknown>>;
+        const missing = [...new Set(keys.flatMap((k) => all[k].missing ?? []))];
+        return [m.number, m.name, m.process, m.site.name, ...keys.map((k) => fmt(all[k].value)), missing.join(", ")];
+      });
+      return { ...meta, description: `${meta.description} Costs in ${ctx.org.cavityCostCurrency}.`, columns: ["Mold", "Name", "Process", "Site", ...keys.map((k) => CALC_FIELDS[k].label), "Missing inputs"], rows, numeric: keys.map((_, i) => i + 4).filter((i) => !["date", "text"].includes(CALC_FIELDS[keys[i - 4]].kind)) };
     }
     case "data_quality": {
       const molds = await db.asset.findMany({ where: { AND: [scope, { assetType: { kind: "mold" }, parentId: null, status: { notIn: ["retired", "scrapped"] } }] }, include: { meters: true, products: { select: { id: true } } }, orderBy: { number: "asc" } });

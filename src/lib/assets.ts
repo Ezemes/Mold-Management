@@ -1,5 +1,6 @@
 import type { Asset, FieldDef } from "@prisma/client";
 import { evalFormula } from "./formula";
+import { PROCESSES } from "./calc.pure";
 
 export const ASSET_STATUS = {
   active: "Active",
@@ -33,15 +34,23 @@ export type StdField = {
   label: string;
   type: "text" | "int" | "float" | "date" | "money";
   unit?: "mm" | "kg" | "g" | "t" | "s" | "shots";
-  section: "Design" | "Press" | "Life" | "Finance";
+  section: "Identity" | "Design" | "Press" | "Life" | "Production" | "Finance";
   kinds: Kind[];
   /** Value stored when the input is left empty (for non-nullable columns). */
   emptyValue?: number;
+  /** Allowed values (shown as a dropdown; CSV values are matched case-insensitively). */
+  options?: readonly string[];
 };
 
 /** Standard typed fields. Custom fields live in Asset.customValues and FieldDef. */
 export const STD_FIELDS: StdField[] = [
-  { key: "toolNumber", var: "tool_number", label: "Tool number", type: "text", section: "Design", kinds: ["mold"] },
+  { key: "process", var: "process", label: "Process (department)", type: "text", section: "Identity", kinds: ["mold"], options: PROCESSES },
+  { key: "toolNumber", var: "tool_number", label: "Supplier tool number", type: "text", section: "Identity", kinds: ["mold"] },
+  { key: "customerToolNumber", var: "customer_tool_number", label: "Customer tool number", type: "text", section: "Identity", kinds: ["mold"] },
+  { key: "componentType", var: "component_type", label: "Component type", type: "text", section: "Identity", kinds: ["mold"] },
+  { key: "brandName", var: "brand_name", label: "Brand name", type: "text", section: "Identity", kinds: ["mold"] },
+  { key: "platform", var: "platform", label: "Platform", type: "text", section: "Identity", kinds: ["mold"] },
+  { key: "productDrawing", var: "product_drawing", label: "Product drawing #", type: "text", section: "Identity", kinds: ["mold"] },
   { key: "designCavities", var: "design_cavities", label: "Design cavities", type: "int", section: "Design", kinds: ["mold"] },
   { key: "designCycleTimeS", var: "design_cycle_time_s", label: "Design cycle time", type: "float", unit: "s", section: "Design", kinds: ["mold"] },
   { key: "shotWeightG", var: "shot_weight_g", label: "Shot weight", type: "float", unit: "g", section: "Design", kinds: ["mold"] },
@@ -73,6 +82,10 @@ export const STD_FIELDS: StdField[] = [
   { key: "refurbsAllowed", var: "refurbs_allowed", label: "Refurbishments allowed", type: "int", section: "Life", kinds: ["mold"] },
   { key: "refurbsDone", var: "refurbs_done", label: "Refurbishments done", type: "int", section: "Life", kinds: ["mold"], emptyValue: 0 },
   { key: "endOfLifeShots", var: "end_of_life_shots", label: "End-of-life shots", type: "int", unit: "shots", section: "Life", kinds: ["mold"] },
+  { key: "annualVolume", var: "annual_volume", label: "Annual volume", type: "int", section: "Production", kinds: ["mold"] },
+  { key: "utilizationPct", var: "utilization_pct", label: "Utilization (%)", type: "float", section: "Production", kinds: ["mold"] },
+  { key: "lastRunDate", var: "last_run_date", label: "Last run date", type: "date", section: "Production", kinds: ["mold"] },
+  { key: "estimatedNewToolCost", var: "estimated_new_tool_cost", label: "Estimated cost of a new tool", type: "money", section: "Finance", kinds: ["mold"] },
   { key: "capitalisationDate", var: "capitalisation_date", label: "Capitalisation date", type: "date", section: "Finance", kinds: ["mold", "press", "equipment"] },
   { key: "capitalValue", var: "capital_value", label: "Capital value", type: "money", section: "Finance", kinds: ["mold", "press", "equipment"] },
   { key: "costCentre", var: "cost_centre", label: "Cost centre", type: "text", section: "Finance", kinds: ["mold", "press", "equipment"] },
@@ -102,7 +115,7 @@ export const DEFAULT_TYPES: { key: string; name: string; kind: Kind; numberPrefi
 ];
 
 /** Variables available to formula fields: standard numeric fields, live counters and numeric custom fields. */
-export function formulaVars(asset: Asset, live: { activeCavities: number | null; lifetimeShots: number | null }, defs: FieldDef[]) {
+export function formulaVars(asset: Asset, live: { activeCavities: number | null; lifetimeShots: number | null }, defs: FieldDef[], calculated: Record<string, number | null> = {}) {
   const vars: Record<string, number | null> = {};
   for (const f of STD_FIELDS) {
     const v = asset[f.key];
@@ -110,6 +123,8 @@ export function formulaVars(asset: Asset, live: { activeCavities: number | null;
   }
   vars.active_cavities = live.activeCavities;
   vars.lifetime_shots = live.lifetimeShots;
+  // Built-in calculated fields (lifecycle and capacity), e.g. remaining_life_pct, daily_output_capacity.
+  Object.assign(vars, calculated);
   const custom = (asset.customValues ?? {}) as Record<string, unknown>;
   for (const d of defs) if (d.type === "number") vars[d.key] = typeof custom[d.key] === "number" ? (custom[d.key] as number) : null;
   // Formulas may reference earlier formulas (sorted by sortOrder).
@@ -117,7 +132,7 @@ export function formulaVars(asset: Asset, live: { activeCavities: number | null;
   return vars;
 }
 
-export const FORMULA_HELP = "Use + − × ÷ (as + - * /), parentheses, min(), max(), round(x, digits). Variables: standard fields (e.g. design_cavities, design_cycle_time_s), active_cavities, lifetime_shots and numeric custom fields by key.";
+export const FORMULA_HELP = "Use + − × ÷ (as + - * /), parentheses, min(), max(), round(x, digits). Variables: standard fields (e.g. design_cavities, design_cycle_time_s), active_cavities, lifetime_shots, the built-in calculated fields (e.g. remaining_life_pct, shots_until_refurb, refurbs_remaining, daily_output_capacity, annual_output_capacity, free_annual_capacity_pcs; dates as days from today, e.g. next_refurbishment) and numeric custom fields by key.";
 
 export function slugKey(label: string) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "field";

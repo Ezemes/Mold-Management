@@ -134,6 +134,9 @@ export type CapacityMold = {
   eolMonth: string | null;
   /** First month with capacity (for a planned or what-if mold). */
   fromMonth?: string;
+  /** The site's own shift pattern and OEE, when recorded (otherwise the organisation defaults apply). */
+  hoursPerMonth?: number | null;
+  oeePct?: number | null;
   hypothetical?: boolean;
 };
 
@@ -149,8 +152,8 @@ export function moldCapacity(m: CapacityMold, partNumber: string, month: string,
   const cavities = prod.cavities != null ? Math.min(prod.cavities, m.activeCavities) : m.activeCavities / shared;
   const days = daysInMonth(month);
   const down = m.refurbMonths.includes(month) ? Math.min(days, s.refurbDowntimeDays) : 0;
-  const hours = s.hoursPerMonth * ((days - down) / days);
-  return Math.floor(cavities * (3600 / m.cycleS) * hours * (s.oeePct / 100));
+  const hours = (m.hoursPerMonth ?? s.hoursPerMonth) * ((days - down) / days);
+  return Math.floor(cavities * (3600 / m.cycleS) * hours * ((m.oeePct ?? s.oeePct) / 100));
 }
 
 export function capacityPlan(
@@ -172,4 +175,10 @@ export function capacityPlan(
     return { partNumber, makers: makers.map((m) => m.number), cells, shortfallMonths: months.filter((mo) => cells[mo].gap < 0) };
   });
   return { rows, shortfalls: rows.reduce((t, r) => t + r.shortfallMonths.length, 0) };
+}
+
+/** Production hours per month from a site's shift pattern, or null if any part of it is missing. */
+export function siteHoursPerMonth(site: { hoursPerShift: number | null; shiftsPerDay: number | null; daysPerWeek: number | null; weeksPerYear: number | null }) {
+  const { hoursPerShift: h, shiftsPerDay: sh, daysPerWeek: d, weeksPerYear: w } = site;
+  return h != null && sh != null && d != null && w != null ? (h * sh * d * w) / 12 : null;
 }

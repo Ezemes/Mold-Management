@@ -18,8 +18,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         : ctx.can("maintenance") && !!(await db.workOrder.findFirst({ where: { AND: [workOrderScope(ctx), { id: a.ownerId }] } }));
   if (!visible) return new Response("Not found", { status: 404 });
   const bytes = await getFile(a.storageKey);
-  const inline = /^(image\/|application\/pdf)/.test(a.mimeType);
+  const inline = /^(image\/|video\/|application\/pdf)/.test(a.mimeType);
   return new Response(new Uint8Array(bytes), {
-    headers: { "Content-Type": a.mimeType, "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(a.filename)}`, "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox", "Cache-Control": "private, no-store" },
+    headers: { "Content-Type": a.mimeType, "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(a.filename)}`, "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox", "Cache-Control": "private, no-store" },
   });
 }

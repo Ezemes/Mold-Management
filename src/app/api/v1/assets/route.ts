@@ -15,5 +15,5 @@ export const GET = apiRoute("assets:read", async (req, ctx) => {
     AND: [keyAssetScope(ctx), type ? { assetType: { OR: [{ kind: type }, { key: type }] } } : {}, site ? { site: { code: site } } : {}, status ? { status } : {}, since ? { updatedAt: { gte: since } } : {}],
   };
   const rows = await db.asset.findMany({ where, include: assetInclude, orderBy: { id: "asc" }, ...pg });
-  return page(rows, limit, assetOut);
+  return page(rows, limit, (a) => assetOut(a, ctx.org));
 });

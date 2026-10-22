@@ -26,6 +26,12 @@ export function SiteFields({ s, divisions, partners, fixedPartnerId }: { s?: Par
       <Field label="Status"><Select name="active" defaultValue={s?.active === false ? "0" : "1"} options={{ "1": "Active", "0": "Inactive" }} /></Field>
       <Field label="Latitude"><Input name="latitude" type="number" step="any" defaultValue={s?.latitude ?? ""} /></Field>
       <Field label="Longitude"><Input name="longitude" type="number" step="any" defaultValue={s?.longitude ?? ""} /></Field>
+      <p className="mt-2 text-sm font-semibold sm:col-span-3">Shift pattern <span className="font-normal text-ink-500">(needed for the capacity calculations of molds at this site)</span></p>
+      <Field label="Hours per shift" hint="e.g. 8 or 12"><Input name="hoursPerShift" inputMode="decimal" defaultValue={s?.hoursPerShift ?? ""} /></Field>
+      <Field label="Shifts per day" hint="1, 2 or 3"><Input name="shiftsPerDay" inputMode="numeric" defaultValue={s?.shiftsPerDay ?? ""} /></Field>
+      <Field label="Days per week" hint="5, 6 or 7"><Input name="daysPerWeek" inputMode="numeric" defaultValue={s?.daysPerWeek ?? ""} /></Field>
+      <Field label="Weeks per year" hint="50, 51 or 52"><Input name="weeksPerYear" inputMode="numeric" defaultValue={s?.weeksPerYear ?? ""} /></Field>
+      <Field label="OEE (%)" hint="e.g. 85"><Input name="oeePct" inputMode="decimal" defaultValue={s?.oeePct ?? ""} /></Field>
     </div>
   );
 }

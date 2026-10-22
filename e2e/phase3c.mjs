@@ -40,7 +40,7 @@ await loginAs(page, 'admin@sharma.example');
 const m1 = id('M-0001'), m3 = id('M-0003'), p1 = id('P-0001');
 const partId = q(`select id from "Part" where number='EJ-6X150'`);
 const pages = ['/presses', '/presses/finder', '/presses/finder?mold=M-0003', '/presses/finder?press=P-0002', '/presses/approved', '/quality', '/quality?view=due', '/quality?view=recent', '/quality/evaluations/new', `/quality/evaluations/new?asset=${m3}`,
-  '/quality/qualifications', '/quality/qualifications/new', `/quality/qualifications/${q(`select id from "Qualification" limit 1`)}`, '/quality/criteria', '/inventory', '/inventory?new=1', `/inventory/parts/${partId}`, '/inventory/stock', '/inventory/ledger', '/inventory/reorder',
+  '/quality/qualifications', '/quality/qualifications/new', `/quality/qualifications/${q(`select id from "Qualification" limit 1`)}`, '/quality/templates', '/inventory', '/inventory?new=1', `/inventory/parts/${partId}`, '/inventory/stock', '/inventory/ledger', '/inventory/reorder',
   '/planning/forecast', '/planning/forecast?within=90', '/planning/capacity', '/planning/budget', '/reports', ...['fleet_status', 'custody', 'life', 'approaching', 'maintenance_cost', 'budget', 'transit', 'data_quality'].map((k) => `/reports/${k}`),
   `/assets/${m1}?tab=presses`, `/assets/${m1}?tab=quality`, `/assets/${p1}?tab=presses`, `/assets/${p1}`, '/admin/settings', '/dashboard'];
 const bad = [];
@@ -88,26 +88,45 @@ for (const st of ['IQ', 'OQ', 'PQ']) {
 }
 check('passing PQ approves M-0003 on P-0002', q(`select status from "Qualification" where id='${qid}'`) === 'passed' && q(`select status from "MoldPress" where "moldId"='${m3}' and "pressId"='${id('P-0002')}'`) === 'approved', f);
 
-// ── Condition evaluation: notes required for low scores; approval below threshold raises a work order
+// ── Condition assessment (guided): comments required for Poor ratings; approval with a Poor rating raises a work order
+const injection = JSON.parse(q(`select components::text from "InspectionTemplate" where name='Injection'`));
+/** Run the guided assessment on the machine; ratings by component key, everything else N/A. */
+async function assess(assetRef, ratings, notes = {}, onStep = async () => {}) {
+  await page.goto(B + `/quality/assess?asset=${encodeURIComponent(assetRef)}&mode=machine`);
+  await page.check('[name=qualityIssues][value=no]', { force: true });
+  await page.locator('button', { hasText: 'Start inspection' }).click();
+  for (const c of injection) {
+    await page.check(`[name="r.${c.key}"][value="${ratings[c.key] ?? 'na'}"]`, { force: true });
+    await onStep(c);
+    if (notes[c.key]) await page.fill(`[name="n.${c.key}"]`, notes[c.key]);
+    await page.locator('button', { hasText: /Next element|Next: questions/ }).click();
+  }
+  await page.check('[name=operationalIssues][value=no]', { force: true });
+  await page.check('[name=spareParts][value=Okay]');
+  await page.check('[name=supplyRisk][value=no]', { force: true });
+  await page.fill('[name=overallCondition]', 'Assessed in the press.');
+  await page.locator('button', { hasText: 'Review' }).click();
+  await page.click('button:has-text("Submit assessment")');
+  await page.waitForURL(/\/quality\/evaluations\//, { timeout: 60000 }); await page.waitForLoadState('networkidle');
+  return flash(page);
+}
 await loginAs(page, 'tech@sharma.example');
 const m2 = id('M-0002');
-await page.goto(B + `/quality/evaluations/new?asset=${m2}`);
-const scores = { parting_line: '2', cavity_surfaces: '3', vents: '2', cooling: '3', ejectors: '3', slides: '4', guiding: '4' };
-for (const [k, v] of Object.entries(scores)) await page.selectOption(`[name="score.${k}"]`, v);
-f = await submit('button:has-text("Submit for approval")');
-check('scores of 2 or below need a note', f.includes('Add a note'), f);
-for (const [k, v] of Object.entries(scores)) await page.selectOption(`[name="score.${k}"]`, v);
-await page.fill('[name="note.parting_line"]', 'Flash marks along the parting line');
-await page.fill('[name="note.vents"]', 'Vents blocked with residue');
-f = await submit('button:has-text("Submit for approval")');
+let noteError = '';
+f = await assess(m2, { cavities: '2', vents: '2', cores: '4', ejector_pins: '4' }, { cavities: 'Flash on the parting line', vents: 'Vents blocked with residue' }, async (c) => {
+  if (c.key !== 'cavities') return;
+  await page.locator('button', { hasText: /Next element/ }).click();
+  noteError = (await page.locator('[role=alert]').first().textContent()) ?? '';
+});
+check('a Poor rating needs a comment before moving on', noteError.includes('explain the Poor rating'), noteError);
 const ev = q(`select id||'|'||score from "ConditionEvaluation" where "assetId"='${m2}'`);
-check('weighted score skips N/A: (2×3 + 3×3 + 2×2 + 3×2 + 3×2 + 4 + 4) / 14 = 2.79', ev.endsWith('|2.79'), `${ev} / ${f}`);
+check('weighted score skips N/A: (2 + 2 + 4 + 4) ÷ 4 = 3.00', ev.endsWith('|3'), `${ev} / ${f}`);
 await loginAs(page, 'admin@sharma.example');
 await page.goto(B + `/quality/evaluations/${ev.split('|')[0]}`);
 f = await submit('button:has-text("Approve")');
 const after = q(`select coalesce("conditionScore",0)||'|'||("nextEvaluationDate" > now()) from "Asset" where id='${m2}'`);
-check('approval updates the passport score and schedules the next evaluation', after === '2.79|true', after);
-check('a score below 3 raises a corrective work order', q(`select source from "WorkOrder" where id=(select "workOrderId" from "ConditionEvaluation" where "assetId"='${m2}')`) === 'evaluation', f);
+check('approval updates the passport score and schedules the next evaluation', after === '3|true', after);
+check('Poor components raise a corrective work order even at the threshold', q(`select source from "WorkOrder" where id=(select "workOrderId" from "ConditionEvaluation" where "assetId"='${m2}')`) === 'evaluation', f);
 
 // ── Spare parts: issue to a work order, shortage refused, return on removal, receipt clears the reorder list
 await loginAs(page, 'tooling@sharma.example');
@@ -193,12 +212,10 @@ check('supplier is blocked from planning, inventory and reports', true);
 await page.goto(B + '/presses');
 const supPresses = await page.locator('tbody tr td:first-child a').allTextContents();
 check('supplier sees only presses at its own sites', JSON.stringify(supPresses) === JSON.stringify(['P-0004']), supPresses.join(','));
-await page.goto(B + `/quality/evaluations/new?asset=${id('M-0004')}`);
-await page.selectOption('[name="score.parting_line"]', '4');
-f = await submit('button:has-text("Submit for approval")');
+f = await assess(id('M-0004'), { cavities: '4' });
 check('supplier can submit a condition evaluation on a mold it holds', f.includes('submitted'), f);
 const e2 = errors.length;
-const other = await page.goto(B + `/quality/evaluations/new?asset=${m1}`);
+const other = await page.goto(B + `/quality/assess?asset=${m1}&mode=bench`);
 check('supplier cannot evaluate a mold it does not hold', ((await page.locator('main').textContent()) ?? '').includes('No asset'), String(other.status()));
 errors.splice(e2);
 

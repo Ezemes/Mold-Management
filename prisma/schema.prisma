@@ -36,39 +36,43 @@ model Organisation {
   reconMinShots         Int      @default(200)
   /// How close (days) a counter reading must be to a production period's start and end
   reconWindowDays       Int      @default(3)
+  /// Cost per cavity by manufacturing process, overriding the defaults: { "Injection": 16000, … }
+  cavityCosts           Json     @default("{}")
+  cavityCostCurrency    String   @default("USD")
   status                String   @default("active") // active | suspended
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  divisions       Division[]
-  sites           Site[]
-  partners        Partner[]
-  memberships     Membership[]
-  roles           Role[]
-  invites         Invite[]
-  assetTypes      AssetType[]
-  assets          Asset[]
-  audit           AuditEvent[]
-  imports         ImportJob[]
-  transfers       Transfer[]
-  templates       MaintenanceTemplate[]
-  plans           MaintenancePlan[]
-  workOrders      WorkOrder[]
-  notifications   Notification[]
-  attachments     Attachment[]
-  moldPresses     MoldPress[]
-  evaluations     ConditionEvaluation[]
-  qualifications  Qualification[]
-  parts           Part[]
-  stockMoves      StockMove[]
-  budgetItems     BudgetItem[]
-  demand          ProductDemand[]
-  apiKeys         ApiKey[]
-  webhooks        WebhookEndpoint[]
-  events          OutboundEvent[]
-  production      ProductionReport[]
-  reconExceptions ReconciliationException[]
-  ssoConnections  SsoConnection[]
+  divisions           Division[]
+  sites               Site[]
+  partners            Partner[]
+  memberships         Membership[]
+  roles               Role[]
+  invites             Invite[]
+  assetTypes          AssetType[]
+  assets              Asset[]
+  audit               AuditEvent[]
+  imports             ImportJob[]
+  transfers           Transfer[]
+  templates           MaintenanceTemplate[]
+  plans               MaintenancePlan[]
+  workOrders          WorkOrder[]
+  notifications       Notification[]
+  attachments         Attachment[]
+  moldPresses         MoldPress[]
+  evaluations         ConditionEvaluation[]
+  qualifications      Qualification[]
+  parts               Part[]
+  stockMoves          StockMove[]
+  budgetItems         BudgetItem[]
+  demand              ProductDemand[]
+  apiKeys             ApiKey[]
+  webhooks            WebhookEndpoint[]
+  events              OutboundEvent[]
+  production          ProductionReport[]
+  reconExceptions     ReconciliationException[]
+  ssoConnections      SsoConnection[]
+  inspectionTemplates InspectionTemplate[]
 }
 
 model Division {
@@ -115,27 +119,33 @@ model Partner {
 
 /// A physical place. partnerId null = the organisation's own site.
 model Site {
-  id         String       @id @default(cuid())
-  orgId      String
-  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  partnerId  String?
-  partner    Partner?     @relation(fields: [partnerId], references: [id], onDelete: Restrict)
-  divisionId String?
-  division   Division?    @relation(fields: [divisionId], references: [id], onDelete: SetNull)
-  name       String
-  code       String       @default("")
-  kind       String       @default("plant") // plant | warehouse | toolmaker | supplier
-  address    String       @default("")
-  city       String       @default("")
-  state      String       @default("")
-  country    String       @default("IN")
-  postalCode String       @default("")
-  timezone   String       @default("Asia/Kolkata")
-  latitude   Float?
-  longitude  Float?
-  active     Boolean      @default(true)
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
+  id            String       @id @default(cuid())
+  orgId         String
+  org           Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  partnerId     String?
+  partner       Partner?     @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  divisionId    String?
+  division      Division?    @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  name          String
+  code          String       @default("")
+  kind          String       @default("plant") // plant | warehouse | toolmaker | supplier
+  address       String       @default("")
+  city          String       @default("")
+  state         String       @default("")
+  country       String       @default("IN")
+  postalCode    String       @default("")
+  timezone      String       @default("Asia/Kolkata")
+  latitude      Float?
+  longitude     Float?
+  /// Location data for capacity: shift pattern and OEE (0–100)
+  hoursPerShift Float?
+  shiftsPerDay  Int?
+  daysPerWeek   Int?
+  weeksPerYear  Int?
+  oeePct        Float?
+  active        Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   assets        Asset[]
   transfersFrom Transfer[] @relation("TransferFromSite")
@@ -373,20 +383,33 @@ model Asset {
   maxMoldWeightKg  Float?
 
   // Life
-  toolmakerPartnerId  String?
-  toolmakerPartner    Partner?  @relation("AssetToolmaker", fields: [toolmakerPartnerId], references: [id], onDelete: SetNull)
-  buildDate           DateTime?
-  warrantyShots       Int?
-  shotsBetweenRefurbs Int?
-  refurbsAllowed      Int?
-  refurbsDone         Int       @default(0)
+  toolmakerPartnerId   String?
+  toolmakerPartner     Partner?  @relation("AssetToolmaker", fields: [toolmakerPartnerId], references: [id], onDelete: SetNull)
+  buildDate            DateTime?
+  warrantyShots        Int?
+  shotsBetweenRefurbs  Int?
+  refurbsAllowed       Int?
+  refurbsDone          Int       @default(0)
   /// Lifetime shots and date at the last completed refurbishment work order
-  lastRefurbShots     Int?
-  lastRefurbDate      DateTime?
-  endOfLifeShots      Int?
-  capitalisationDate  DateTime?
-  capitalValue        Decimal?  @db.Decimal(14, 2)
-  costCentre          String    @default("")
+  lastRefurbShots      Int?
+  lastRefurbDate       DateTime?
+  endOfLifeShots       Int?
+  capitalisationDate   DateTime?
+  capitalValue         Decimal?  @db.Decimal(14, 2)
+  costCentre           String    @default("")
+  /// Manufacturing process ("Department"/"Technology"): Injection, Injection Blow, Extrusion Blow …
+  process              String    @default("")
+  /// Parts per year (drives the lifecycle and capacity calculations)
+  annualVolume         Int?
+  /// Share of the year the tool runs, 0–100 (for "Calculated Annual Volume")
+  utilizationPct       Float?
+  estimatedNewToolCost Decimal?  @db.Decimal(14, 2)
+  lastRunDate          DateTime?
+  componentType        String    @default("")
+  customerToolNumber   String    @default("")
+  brandName            String    @default("")
+  platform             String    @default("")
+  productDrawing       String    @default("")
 
   customValues          Json      @default("{}")
   notes                 String    @default("")
@@ -844,6 +867,11 @@ model ConditionEvaluation {
   decidedAt     DateTime?
   rejectReason  String       @default("")
   workOrderId   String?
+  templateId    String?
+  /// bench | machine (guided assessment)
+  mode          String       @default("bench")
+  /// Data captured during the assessment and the standard questions (see src/lib/inspection.pure.ts)
+  answers       Json         @default("{}")
   createdAt     DateTime     @default(now())
 
   @@index([assetId, evaluatedAt])
@@ -1187,4 +1215,23 @@ model SsoState {
   returnTo     String   @default("/dashboard")
   expiresAt    DateTime
   createdAt    DateTime @default(now())
+}
+
+/// Inspection template: the mold elements to assess (with optional key-point checks) for one or more processes.
+model InspectionTemplate {
+  id         String       @id @default(cuid())
+  orgId      String
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name       String
+  /// Asset processes this template applies to (matched case-insensitively)
+  processes  String[]     @default([])
+  /// Used when no template matches the asset's process
+  isDefault  Boolean      @default(false)
+  /// [{ key, label, weight, checks: string[] }]
+  components Json         @default("[]")
+  active     Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([orgId, name])
 }

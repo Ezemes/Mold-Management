@@ -15,7 +15,8 @@
     "test:e2e": "node e2e/acceptance.mjs",
     "test:e2e:3b": "node e2e/phase3b.mjs",
     "test:e2e:3c": "node e2e/phase3c.mjs",
-    "test:e2e:3d": "node e2e/phase3d.mjs"
+    "test:e2e:3d": "node e2e/phase3d.mjs",
+    "test:e2e:inspection": "node e2e/inspection.mjs"
   },
   "dependencies": {
     "@node-saml/node-saml": "^5.1.0",

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { assertCan, requireOrg } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { FEATURE_LABELS, STD_FIELDS, slugKey, type Features } from "@/lib/assets";
+import { CALC_VARS } from "@/lib/calc.pure";
 import { compileFormula } from "@/lib/formula";
 import { str } from "@/lib/forms";
 
@@ -13,7 +14,7 @@ function back(path: string, msg: string, kind: "error" | "ok" = "error"): never 
 }
 
 const FIELD_TYPES = ["text", "number", "date", "boolean", "picklist", "formula"];
-const RESERVED = new Set([...STD_FIELDS.map((f) => f.var), "active_cavities", "lifetime_shots", "number", "name", "status", "site", "type"]);
+const RESERVED = new Set([...STD_FIELDS.map((f) => f.var), ...CALC_VARS, "active_cavities", "lifetime_shots", "number", "name", "status", "site", "type"]);
 
 export async function saveAssetTypeAction(fd: FormData) {
   const ctx = await requireOrg();
@@ -62,7 +63,7 @@ export async function saveFieldAction(fd: FormData) {
       syntaxError = e instanceof Error ? e.message : "invalid formula";
     }
     if (syntaxError) back(path, `Formula error: ${syntaxError}`);
-    const known = new Set([...STD_FIELDS.map((f) => f.var), "active_cavities", "lifetime_shots", ...t.fields.filter((f) => (f.type === "number" || f.type === "formula") && f.id !== id).map((f) => f.key)]);
+    const known = new Set([...STD_FIELDS.map((f) => f.var), ...CALC_VARS, "active_cavities", "lifetime_shots", ...t.fields.filter((f) => (f.type === "number" || f.type === "formula") && f.id !== id).map((f) => f.key)]);
     const unknown = refs.filter((r) => !known.has(r));
     if (unknown.length) back(path, `Unknown variable(s) in formula: ${unknown.join(", ")}`);
   }

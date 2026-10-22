@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { setupOrganisation } from "../src/lib/org-setup";
 import { parseTaskLines } from "../src/lib/maintenance.pure";
+import { DEFAULT_TEMPLATES } from "../src/lib/inspection.pure";
 
 const db = new PrismaClient();
 const PASSWORD = "Demo@12345";
@@ -27,13 +28,13 @@ async function main() {
 
     const auto = await tx.division.create({ data: { orgId: org.id, name: "Automotive", code: "AUTO" } });
     const pune = await tx.site.findFirstOrThrow({ where: { orgId: org.id } });
-    await tx.site.update({ where: { id: pune.id }, data: { code: "PUN1", divisionId: auto.id, address: "Plot 42, MIDC Bhosari", postalCode: "411026", latitude: 18.6298, longitude: 73.8474 } });
+    await tx.site.update({ where: { id: pune.id }, data: { code: "PUN1", divisionId: auto.id, address: "Plot 42, MIDC Bhosari", postalCode: "411026", latitude: 18.6298, longitude: 73.8474, hoursPerShift: 8, shiftsPerDay: 3, daysPerWeek: 6, weeksPerYear: 50, oeePct: 85 } });
     const chennai = await tx.site.create({ data: { orgId: org.id, name: "Chennai Plant", code: "CHE1", kind: "plant", city: "Sriperumbudur", state: "Tamil Nadu", postalCode: "602105" } });
     const store = await tx.site.create({ data: { orgId: org.id, name: "Pune Tool Store", code: "PUN-TS", kind: "warehouse", divisionId: auto.id, city: "Pune", state: "Maharashtra" } });
 
     const brightway = await tx.partner.create({ data: { orgId: org.id, name: "Brightway Plastics", kind: "molder", gstin: "27AABCB1234C1Z5", contactName: "Rahul Deshmukh", contactEmail: "rahul@brightway.example", contactPhone: "+91 98220 00000" } });
     const precision = await tx.partner.create({ data: { orgId: org.id, name: "Precision Toolings", kind: "toolmaker", gstin: "33AAFCP5678D1Z2", contactName: "S. Kumar" } });
-    const chakan = await tx.site.create({ data: { orgId: org.id, partnerId: brightway.id, name: "Brightway Chakan", code: "BW-CHK", kind: "supplier", city: "Chakan", state: "Maharashtra" } });
+    const chakan = await tx.site.create({ data: { orgId: org.id, partnerId: brightway.id, name: "Brightway Chakan", code: "BW-CHK", kind: "supplier", city: "Chakan", state: "Maharashtra", hoursPerShift: 12, shiftsPerDay: 2, daysPerWeek: 6, weeksPerYear: 50, oeePct: 80 } });
     await tx.site.create({ data: { orgId: org.id, partnerId: precision.id, name: "Precision Hosur", code: "PT-HSR", kind: "toolmaker", city: "Hosur", state: "Tamil Nadu" } });
 
     const user = (email: string, firstName: string, lastName: string) => tx.user.create({ data: { email, passwordHash: hash, firstName, lastName, emailVerifiedAt: new Date() } });
@@ -78,7 +79,10 @@ async function main() {
           // Sized so the compatibility finder has something to show (spec acceptance 4: M-0003 needs 450 t).
           shotWeightG: cav * 45, widthMm: 400 + cav * 15, heightMm: 450 + cav * 10, stackHeightMm: 350 + cav * 10, openingStrokeMm: 250, locatingRingMm: 125, sprueRadiusMm: 15.5, weightKg: 600 + cav * 100,
           warrantyShots: warranty, shotsBetweenRefurbs: Math.round(eol / 3), refurbsAllowed: 2, endOfLifeShots: eol,
-          buildDate: new Date("2023-04-01"), capitalValue: cav * 350_000, costCentre: "CC-AUTO-01",
+          buildDate: new Date("2023-04-01"), capitalisationDate: new Date("2023-04-15"), capitalValue: cav * 350_000, costCentre: "CC-AUTO-01",
+          // Inputs for the calculated fields: process, annual volume (≈ 3,000 running hours) and utilisation.
+          process: number === "M-0006" ? "Injection Blow" : number === "M-0007" ? "Extrusion Blow" : "Injection",
+          annualVolume: Math.round((cav * (3600 / cycle) * 3000) / 1000) * 1000, utilizationPct: 60, toolNumber: `BW-${number.slice(2)}`, componentType: "Interior trim", brandName: "Tata Motors", platform: "Nexon",
           customValues: { steel_grade: steel, gate_type: "Submarine" } as Prisma.InputJsonValue,
         },
       });
@@ -96,6 +100,7 @@ async function main() {
           ],
         });
         await tx.meter.update({ where: { id: meter.id }, data: { lastRawValue: shots, lifetimeTotal: shots, lastReadingAt: latest } });
+        await tx.asset.update({ where: { id: a.id }, data: { lastRunDate: latest } });
       }
       await tx.auditEvent.create({ data: { orgId: org.id, userId: admin.id, action: "created", entityType: "asset", entityId: a.id, entityLabel: `${number} ${name}`, reason: "Demo data" } });
     }
@@ -167,6 +172,9 @@ async function main() {
     });
     const m4 = await tx.asset.findFirstOrThrow({ where: { orgId: org.id, number: "M-0004" } });
     await tx.asset.update({ where: { id: m4.id }, data: { requalificationReason: "Moved to Brightway Chakan" } });
+
+    // ── Inspection templates (from the Injection / Injection Blow templates and the Workflow-based Inspection)
+    await tx.inspectionTemplate.createMany({ data: DEFAULT_TEMPLATES.map((t) => ({ orgId: org.id, name: t.name, processes: t.processes, isDefault: t.isDefault, components: t.components as unknown as Prisma.InputJsonValue })) });
 
     // ── Spare parts with stock; the thermocouple is below its reorder point
     await tx.assetType.update({ where: { id: types.mold.id }, data: { budgetRules: { pmCostPerService: 12_000, partsPerCavity: 3_000, refurbCost: 250_000, replacementCost: 1_200_000 } } });

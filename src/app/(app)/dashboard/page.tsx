@@ -20,7 +20,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     where: { AND: [scope, { parentId: null }] },
     include: { assetType: { include: { fields: true } }, cavities: { select: { status: true } }, meters: true, custodianPartner: true, site: true },
   });
-  const rows = assets.map((a) => ({ a, l: liveStats(a, ctx.org.readingOverdueDays) }));
+  const rows = assets.map((a) => ({ a, l: liveStats(a, ctx.org.readingOverdueDays, ctx.org) }));
   const molds = rows.filter((r) => r.a.assetType.kind === "mold");
   const overdue = rows.filter((r) => r.l.readingOverdue);
   const nearEol = molds.filter((r) => (r.l.endOfLifePct ?? 0) >= 80).sort((x, y) => (y.l.endOfLifePct ?? 0) - (x.l.endOfLifePct ?? 0));

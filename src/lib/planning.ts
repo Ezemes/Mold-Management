@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "./db";
 import { assetScope, type Ctx } from "./auth";
-import { lifeForecast, monthKey, shotsPerMonth, type CapacityMold } from "./planning.pure";
+import { lifeForecast, monthKey, shotsPerMonth, siteHoursPerMonth, type CapacityMold } from "./planning.pure";
 
 export * from "./planning.pure";
 
@@ -43,6 +43,8 @@ export function toCapacityMolds(rows: FleetRow[]): CapacityMold[] {
       products: r.asset.products.map((p) => ({ partNumber: p.partNumber, cavities: p.cavitiesUsed })),
       refurbMonths: r.forecast.refurbs.filter((x) => x.date).map((x) => monthKey(x.date!)),
       eolMonth: r.forecast.eol?.date ? nextMonth(monthKey(r.forecast.eol.date)) : null,
+      hoursPerMonth: siteHoursPerMonth(r.asset.site),
+      oeePct: r.asset.site.oeePct,
     }));
 }
 

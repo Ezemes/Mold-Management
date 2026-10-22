@@ -22,7 +22,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   const where: Prisma.AssetWhereInput = { AND: [assetScope(ctx), assetFilter(sp), { parentId: sp.q ? undefined : null }] };
   const include = { assetType: { include: { fields: true } }, site: true, custodianPartner: true, cavities: { select: { status: true } }, meters: true } as const;
   let rows = await db.asset.findMany({ where, include, orderBy: { number: "asc" }, ...(sp.overdue ? {} : { skip: (page - 1) * PAGE, take: PAGE }) });
-  const live = new Map(rows.map((a) => [a.id, liveStats(a, ctx.org.readingOverdueDays)]));
+  const live = new Map(rows.map((a) => [a.id, liveStats(a, ctx.org.readingOverdueDays, ctx.org)]));
   if (sp.overdue) rows = rows.filter((a) => live.get(a.id)!.readingOverdue);
   const total = sp.overdue ? rows.length : await db.asset.count({ where });
   if (sp.overdue) rows = rows.slice((page - 1) * PAGE, page * PAGE);

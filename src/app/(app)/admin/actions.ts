@@ -9,6 +9,7 @@ import { appUrl, sendMail } from "@/lib/mail";
 import { MODULES, ACTIONS, normalizePermissions, type Module } from "@/lib/permissions";
 import { PARTNER_KINDS, SITE_KINDS } from "@/lib/assets";
 import { normalizeRules, RULES } from "@/lib/compat.pure";
+import { PROCESSES } from "@/lib/calc.pure";
 import { TIMEZONES } from "@/lib/india";
 import { int, str, token } from "@/lib/forms";
 
@@ -62,7 +63,25 @@ function siteData(fd: FormData) {
     latitude: num(fd, "latitude"),
     longitude: num(fd, "longitude"),
     active: str(fd, "active") !== "0",
+    // Location data for the capacity calculations
+    hoursPerShift: num(fd, "hoursPerShift"),
+    shiftsPerDay: num(fd, "shiftsPerDay"),
+    daysPerWeek: num(fd, "daysPerWeek"),
+    weeksPerYear: num(fd, "weeksPerYear"),
+    oeePct: num(fd, "oeePct"),
   };
+}
+
+/** Shift pattern sanity: each value in range and no more than 24 hours a day. */
+function shiftProblem(d: ReturnType<typeof siteData>) {
+  const bad = (v: number | null, lo: number, hi: number, int = true) => v != null && (v < lo || v > hi || (int && !Number.isInteger(v)));
+  if (bad(d.hoursPerShift, 1, 24, false)) return "Hours per shift must be between 1 and 24.";
+  if (bad(d.shiftsPerDay, 1, 4)) return "Shifts per day must be 1 to 4.";
+  if (d.hoursPerShift != null && d.shiftsPerDay != null && d.hoursPerShift * d.shiftsPerDay > 24) return "Hours per shift × shifts per day can't exceed 24.";
+  if (bad(d.daysPerWeek, 1, 7)) return "Days per week must be 1 to 7.";
+  if (bad(d.weeksPerYear, 1, 53)) return "Weeks per year must be 1 to 53.";
+  if (bad(d.oeePct, 1, 100, false)) return "OEE must be between 1 and 100%.";
+  return null;
 }
 
 export async function saveSiteAction(fd: FormData) {
@@ -74,6 +93,8 @@ export async function saveSiteAction(fd: FormData) {
   if (!data.name) back(ret, "Site name is required.");
   if (data.latitude != null && (data.latitude < -90 || data.latitude > 90)) back(ret, "Latitude must be between -90 and 90.");
   if (data.longitude != null && (data.longitude < -180 || data.longitude > 180)) back(ret, "Longitude must be between -180 and 180.");
+  const shift = shiftProblem(data);
+  if (shift) back(ret, shift);
   if (data.divisionId && !(await db.division.findFirst({ where: { id: data.divisionId, orgId: ctx.org.id } }))) back(ret, "Unknown division.");
   if (data.partnerId && !(await db.partner.findFirst({ where: { id: data.partnerId, orgId: ctx.org.id } }))) back(ret, "Unknown partner.");
   const dup = await db.site.findFirst({ where: { orgId: ctx.org.id, name: data.name, NOT: id ? { id } : undefined } });
@@ -281,6 +302,9 @@ export async function saveSettingsAction(fd: FormData) {
     reconTolerancePct: Math.min(100, Math.max(0, int(fd, "reconTolerancePct"))),
     reconMinShots: Math.min(1_000_000, Math.max(0, int(fd, "reconMinShots"))),
     reconWindowDays: Math.min(31, Math.max(0, int(fd, "reconWindowDays"))),
+    cavityCostCurrency: /^[A-Z]{3}$/.test(str(fd, "cavityCostCurrency").toUpperCase()) ? str(fd, "cavityCostCurrency").toUpperCase() : ctx.org.cavityCostCurrency,
+    // Blank = use the default for that process.
+    cavityCosts: Object.fromEntries(PROCESSES.map((p) => [p, Number(str(fd, `cavityCost.${p}`).replace(/,/g, ""))]).filter(([p, v]) => str(fd, `cavityCost.${p as string}`) !== "" && Number.isFinite(v) && (v as number) >= 0)) as Prisma.InputJsonValue,
     compatRules: normalizeRules({
       enabled: Object.fromEntries(Object.keys(RULES).map((k) => [k, str(fd, `rule.${k}`) === "on"])),
       tonnageMarginPct: Number(str(fd, "tonnageMarginPct")),

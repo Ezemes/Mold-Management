@@ -10,6 +10,8 @@ import { DELETION_REASON_HINT } from "@/lib/copy";
 import { Badge, btnClass, Card, cx, EmptyState, Field, FlashFromParams, Input, Notice, PageHeader, Select, Stat, Table, Td } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
 import { LifeBar } from "@/components/life-bar";
+import { CalcValue } from "@/components/calc-value";
+import { CALC_FIELDS, type Calc, type CalcKey } from "@/lib/calc.pure";
 import { moldsForPress, pressesForMold } from "@/lib/compat";
 import { planState, woCost, WO_BADGE, WO_STATUS, WO_TYPES, workOrderScope } from "@/lib/maintenance";
 import {
@@ -30,6 +32,7 @@ import {
 const TABS = [
   ["overview", "Overview"],
   ["specs", "Specifications"],
+  ["calculated", "Calculated fields"],
   ["components", "Components & cavities"],
   ["counter", "Shot counter"],
   ["documents", "Documents"],
@@ -50,7 +53,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
   const org = ctx.org;
   const tz = org.timezone;
   const kind = a.assetType.kind;
-  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "maintenance" ? ctx.can("maintenance") : k === "presses" ? kind === "mold" || kind === "press" : k === "quality" ? ctx.can("quality") && kind !== "press" : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
+  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "maintenance" ? ctx.can("maintenance") : k === "calculated" ? kind === "mold" : k === "presses" ? kind === "mold" || kind === "press" : k === "quality" ? ctx.can("quality") && kind !== "press" : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
   const tab = tabs.find(([k]) => k === sp.tab)?.[0] ?? "overview";
   const hid = <input type="hidden" name="id" value={a.id} />;
   const canEdit = ctx.can("assets", "edit");
@@ -113,6 +116,13 @@ export default async function PassportPage({ params, searchParams }: { params: P
               <Stat label="End of life" value={live.endOfLifePct != null ? <LifeBar pct={live.endOfLifePct} /> : "—"} hint={live.shotsToEndOfLife != null ? `${fmtNum(live.shotsToEndOfLife, org)} shots left` : "set end-of-life shots"} />
               <Stat label="Warranty used" value={live.warrantyPct != null ? `${live.warrantyPct.toFixed(1)}%` : "—"} hint={a.warrantyShots ? `of ${fmtNum(a.warrantyShots, org)} shots` : undefined} />
               <Stat label="Active cavities" value={live.activeCavities ?? "—"} hint={live.blockedCavities ? `${live.blockedCavities} blocked of ${a.designCavities ?? a.cavities.length}` : a.designCavities ? `design ${a.designCavities}` : undefined} />
+            </div>
+          )}
+          {kind === "mold" && live.calc && (
+            <div className="grid gap-4 sm:grid-cols-4">
+              {(["refurbishmentPriority", "nextRefurbishment", "expectedEndOfLife", "remainingLifePct"] as const).map((k) => (
+                <Stat key={k} label={CALC_FIELDS[k].label} value={<span className="text-lg"><CalcValue k={k} c={live.calc!.lifecycle[k]} org={org} currency={org.cavityCostCurrency} /></span>} hint={<Link href={`/assets/${a.id}?tab=calculated`} className="text-brand-700 hover:underline">All calculated fields</Link>} />
+              ))}
             </div>
           )}
           <div className="grid gap-6 lg:grid-cols-2">
@@ -371,6 +381,31 @@ export default async function PassportPage({ params, searchParams }: { params: P
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === "calculated" && live.calc && (
+        <div className="space-y-6">
+          <Notice tone="info">
+            Calculated from this passport, its shot counter and the shift pattern of {a.site.name}. Fill in the fields named under “Needs” to complete a value.
+            {canEdit && <> <Link href={`/assets/${a.id}/edit`} className="underline">Edit passport</Link>.</>}
+            {ctx.can("sites", "edit") && <> <Link href="/admin/sites" className="underline">Edit site shift pattern</Link>.</>}
+          </Notice>
+          {(["lifecycle", "capacity"] as const).map((group) => (
+            <Card key={group} title={group === "lifecycle" ? "Tool lifecycle" : "Capacity"}>
+              <dl className="divide-y divide-gray-100">
+                {(Object.entries(live.calc![group]) as [CalcKey, Calc<unknown>][]).map(([k, c]) => (
+                  <div key={k} className="grid gap-1 py-2.5 sm:grid-cols-[16rem_1fr]">
+                    <dt className="text-sm font-medium">{CALC_FIELDS[k].label}<span className="block text-xs font-normal text-ink-500">{CALC_FIELDS[k].help}</span></dt>
+                    <dd className="text-sm">
+                      <CalcValue k={k} c={c} org={org} currency={org.cavityCostCurrency} />
+                      {c.value != null && c.note && <span className="block text-xs text-ink-500">{c.note}</span>}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+          ))}
         </div>
       )}
 

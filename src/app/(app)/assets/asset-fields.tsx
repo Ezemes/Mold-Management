@@ -24,7 +24,11 @@ export function StandardFields({ kind, a }: { kind: string; a?: Partial<Asset> }
           <div className="grid gap-3 sm:grid-cols-3">
             {fields.filter((f) => f.section === s).map((f) => (
               <Field key={f.key} label={`${f.label}${f.unit ? ` (${UNIT_LABEL[f.unit]})` : f.type === "money" ? " (₹)" : ""}`}>
-                <Input name={f.var} type={f.type === "date" ? "date" : "text"} defaultValue={stdValue(a, f.key)} inputMode={f.type === "int" ? "numeric" : f.type === "text" || f.type === "date" ? undefined : "decimal"} />
+                {f.options ? (
+                  <Select name={f.var} options={f.options.map((o) => [o, o] as [string, string])} placeholder="—" defaultValue={stdValue(a, f.key)} />
+                ) : (
+                  <Input name={f.var} type={f.type === "date" ? "date" : "text"} defaultValue={stdValue(a, f.key)} inputMode={f.type === "int" ? "numeric" : f.type === "text" || f.type === "date" ? undefined : "decimal"} />
+                )}
               </Field>
             ))}
           </div>

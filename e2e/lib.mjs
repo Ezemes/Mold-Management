@@ -2,7 +2,7 @@
 import { chromium } from 'playwright-core';
 export const B = process.env.BASE_URL ?? 'http://localhost:3000';
 export async function start() {
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, acceptDownloads: true });
   const page = await ctx.newPage();
   const errors = [];

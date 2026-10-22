@@ -36,8 +36,12 @@ export function parseStd(f: StdField, raw: string): Parsed<string | number | Dat
       return parseNumber(raw, f.label, false);
     case "date":
       return parseDate(raw, f.label);
-    default:
-      return { ok: true, value: raw.trim() };
+    default: {
+      const v = raw.trim();
+      if (!v || !f.options) return { ok: true, value: v };
+      const hit = f.options.find((o) => o.toLowerCase() === v.toLowerCase());
+      return hit ? { ok: true, value: hit } : { ok: false, error: `${f.label}: "${v}" is not one of ${f.options.join(", ")}` };
+    }
   }
 }
 

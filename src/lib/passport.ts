@@ -4,6 +4,7 @@ import { db } from "./db";
 import { assetScope, type Ctx } from "./auth";
 import { features, formulaVars } from "./assets";
 import { isReadingOverdue } from "./meters";
+import { calculate, calcVars, inputFromAsset } from "./calc.pure";
 
 export async function loadPassport(ctx: Ctx, id: string) {
   const a = await db.asset.findFirst({
@@ -23,7 +24,7 @@ export async function loadPassport(ctx: Ctx, id: string) {
     },
   });
   if (!a) return null;
-  return { asset: a, live: liveStats(a, ctx.org.readingOverdueDays) };
+  return { asset: a, live: liveStats(a, ctx.org.readingOverdueDays, ctx.org) };
 }
 
 type LiveInput = Parameters<typeof formulaVars>[0] & {
@@ -31,15 +32,18 @@ type LiveInput = Parameters<typeof formulaVars>[0] & {
   cavities: { status: string }[];
   meters: Meter[];
   assetType: { kind: string; features: unknown; fields: Parameters<typeof formulaVars>[2] };
+  site?: Parameters<typeof inputFromAsset>[0]["site"];
 };
 
-export function liveStats(a: LiveInput, overdueDays: number) {
+/** Live counters, the built-in calculated fields (when the site is loaded) and custom formula values. */
+export function liveStats(a: LiveInput, overdueDays: number, org?: { cavityCosts: unknown }) {
+  const calc = a.site && org ? calculate(inputFromAsset({ ...a, site: a.site }, org)) : null;
   const f = features(a.assetType.features);
   const shots = a.meters.find((m) => m.kind === "shots") ?? null;
   const activeCavities = a.cavities.length ? a.cavities.filter((c) => c.status === "active").length : a.designCavities ?? null;
   const lifetimeShots = shots ? shots.lifetimeTotal : null;
   const pct = (limit: number | null | undefined) => (lifetimeShots != null && limit ? Math.min(999, (lifetimeShots / limit) * 100) : null);
-  const vars = formulaVars(a, { activeCavities, lifetimeShots }, a.assetType.fields);
+  const vars = formulaVars(a, { activeCavities, lifetimeShots }, a.assetType.fields, calc ? calcVars(calc) : {});
   const tracksReadings = f.meters && a.status === "active";
   return {
     features: f,
@@ -51,6 +55,7 @@ export function liveStats(a: LiveInput, overdueDays: number) {
     endOfLifePct: pct(a.endOfLifeShots),
     shotsToEndOfLife: lifetimeShots != null && a.endOfLifeShots ? Math.max(0, a.endOfLifeShots - lifetimeShots) : null,
     readingOverdue: tracksReadings && shots ? isReadingOverdue(shots.lastReadingAt, overdueDays) : false,
+    calc,
     formulas: Object.fromEntries(a.assetType.fields.filter((d) => d.type === "formula").map((d) => [d.key, vars[d.key] ?? null])),
   };
 }

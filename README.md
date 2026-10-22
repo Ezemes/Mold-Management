@@ -133,6 +133,25 @@ System of record for injection molds across your plants and supplier network: wh
   - **One-time state:** each sign-in is single-use and tied to the browser that started it, which protects against replay and login CSRF.
 - **Security update:** Next.js went from 15.5.4 to 15.5.28, which fixes a critical remote-code-execution advisory.
 
+## Calculated fields, health rating and guided inspections
+
+Details, formulas and decisions are in [`docs/CALCULATIONS_AND_INSPECTIONS.md`](docs/CALCULATIONS_AND_INSPECTIONS.md).
+
+- **Calculated fields** from the *Mold Calculated Fields* document, on every mold passport:
+  - **Lifecycle:** Expected End of Life, Next Refurbishment, Refurbishment Priority, Remaining Life, Shots Since/Until Refurb, Refurbs Remaining, Calculated Replacement Cost and Cost Average Refurb.
+  - **Capacity:** Daily, Weekly and Annual Output Capacity, Free Annual Capacity (pcs and %), Calculated Annual Volume, Calculated % Utilization, Production Days Required and Actual Cavitation %.
+  - Each value says which inputs it still needs.
+  - New inputs: process (department), annual volume and utilisation on the passport; the shift pattern and OEE on each site; cost per cavity in Settings.
+  - The values feed custom formulas, the life forecast, the capacity plan, the API and a report.
+- **Health rating:** 5 Excellent → 1 Unacceptable (plus N/A), with the *Mold Health Rating* descriptions. Approving an Unacceptable rating quarantines the mold; Poor ratings or reported issues raise a work order.
+- **Inspection templates:** Injection (25 components) and Injection Blow (20), from your inspection spreadsheets, and Extrusion Blow (13 elements with YES/NO key points) from the *Workflow-based Inspection*. Each organisation can edit its own copies.
+- **Guided assessment** (Quality → Start assessment):
+  - On the bench or on the machine, with optional background video on the bench.
+  - Captures live data, then one screen per element.
+  - A NO answer needs a comment and a photo, and Poor or Unacceptable ratings need an explanation.
+  - Ends with the templates' questions, then a review.
+- **Reports:** *Inspection summary* (the templates' Summary sheet) and *Calculated fields*.
+
 Not yet built: downtime events (§4.9); Phase 4 (native app, ERP/BI connectors, sensors, AI).
 
 ## Stack
@@ -163,11 +182,12 @@ To start without demo data, register at `/register`; you become the organisation
 ## Tests
 
 ```bash
-npm test             # unit tests (39): formulas, shot counters, CSV import, transfers, maintenance, compatibility, quality, stock, planning
+npm test             # unit tests (49): formulas, shot counters, CSV import, transfers, maintenance, compatibility, quality, stock, planning
 npm run test:e2e     # Phase 3a browser acceptance suite (31 checks) against a running app
 npm run test:e2e:3b  # Phase 3b suite (36 checks): transfers, disputes, triggers, work orders, quarantine, supplier
 npm run test:e2e:3c  # Phase 3c suite (34 checks): compatibility, qualification, evaluations, stock, planning, reports
 npm run test:e2e:3d  # Phase 3d suite (49 checks): API, webhooks, reconciliation, OIDC and SAML sign-in
+npm run test:e2e:inspection  # Calculated fields and guided inspections (35 checks)
 ```
 
 The 3d suite runs its own mock OIDC and SAML identity providers (ports 4455/4456) and a webhook receiver (4466). Start the app for it with `APP_URL=http://localhost:3000 WEBHOOK_ALLOW_HTTP=1 WEBHOOK_ALLOW_PRIVATE=1 SSO_SKIP_DOMAIN_VERIFICATION=1`. These three settings are for tests only and must not be set in production.
@@ -209,6 +229,8 @@ src/lib/quality*.ts           Weighted condition scores, IQ/OQ/PQ stage rules, r
 src/lib/inventory*.ts         Stock rules (pure) and the atomic stock move
 src/lib/planning*.ts          Shot rate, life forecast, budget rules, capacity (pure) and fleet queries
 src/lib/reports.ts            Standard reports (shared by the pages and CSV export)
+src/lib/calc.pure.ts          Calculated fields (lifecycle and capacity) with missing-input diagnostics
+src/lib/inspection*.ts        Health rating, inspection templates, assessment rules
 src/lib/api*.ts               API keys, auth, scopes, rate limit, paging; JSON shapes
 src/lib/openapi.ts            OpenAPI document (also renders /developers)
 src/lib/ingest.ts             Readings and production ingestion shared by the API and CSV
@@ -224,7 +246,7 @@ src/app/(app)/transfers/      Transfer list, request, approve, dispatch, receive
 src/app/(app)/maintenance/    Work orders, plans, templates, compliance report
 src/app/(app)/notifications/  Alerts
 src/app/(app)/presses/        Press registry, compatibility finder, approved pairs
-src/app/(app)/quality/        Condition evaluations, qualifications, criteria
+src/app/(app)/quality/        Guided assessments, evaluations, qualifications, inspection templates
 src/app/(app)/inventory/      Parts, stock by site, ledger, reorder list
 src/app/(app)/planning/       Life forecast, capacity plan, budget
 src/app/(app)/reports/        Standard reports

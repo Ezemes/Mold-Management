@@ -14,7 +14,8 @@ export const DEFAULT_MOLD_CRITERIA: Criterion[] = [
   { key: "guiding", label: "Guide pillars and bushes", weight: 1 },
 ];
 
-export const SCORE_LABELS: Record<number, string> = { 1: "1 · Unusable", 2: "2 · Poor", 3: "3 · Fair", 4: "4 · Good", 5: "5 · As new" };
+/** The Mold Health Rating scale: 5 Excellent … 1 Unacceptable (see inspection.pure.ts for descriptions). */
+export const SCORE_LABELS: Record<number, string> = { 1: "1 · Unacceptable", 2: "2 · Poor", 3: "3 · Fair", 4: "4 · Good", 5: "5 · Excellent" };
 
 /** "Label | weight" per line; weight defaults to 1. Keys come from labels and stay unique. */
 export function parseCriteria(src: string): Criterion[] {

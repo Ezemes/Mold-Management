@@ -4,15 +4,23 @@ import { ALLOWED_MIME, MAX_UPLOAD_BYTES, putFile } from "./storage";
 
 export class AttachmentError extends Error {}
 
-/** Validate and store uploaded files from a form field; returns rows to insert. */
-export async function storeUploads(orgId: string, files: FormDataEntryValue[], max = 10) {
+const VIDEO_MIME = /^video\/(webm|mp4)(;.*)?$/;
+export const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
+
+/** Validate and store uploaded files from a form field; returns rows to insert. `video` accepts one recording instead. */
+export async function storeUploads(orgId: string, files: FormDataEntryValue[], max = 10, opts: { video?: boolean } = {}) {
   const real = files.filter((f): f is File => f instanceof File && f.size > 0);
   if (real.length > max) throw new AttachmentError(`Attach at most ${max} files.`);
   const out: { filename: string; mimeType: string; sizeBytes: number; sha256: string; storageKey: string }[] = [];
   for (const f of real) {
-    if (f.size > MAX_UPLOAD_BYTES) throw new AttachmentError(`${f.name} is larger than 25 MB.`);
     const mime = f.type || "application/octet-stream";
-    if (!ALLOWED_MIME.test(mime)) throw new AttachmentError(`${f.name}: file type ${mime} is not allowed.`);
+    if (opts.video) {
+      if (!VIDEO_MIME.test(mime)) throw new AttachmentError(`${f.name}: the recording must be WebM or MP4 video.`);
+      if (f.size > MAX_VIDEO_BYTES) throw new AttachmentError("The video is larger than 120 MB. Record a shorter assessment.");
+    } else {
+      if (f.size > MAX_UPLOAD_BYTES) throw new AttachmentError(`${f.name} is larger than 25 MB.`);
+      if (!ALLOWED_MIME.test(mime)) throw new AttachmentError(`${f.name}: file type ${mime} is not allowed.`);
+    }
     const stored = await putFile(orgId, Buffer.from(await f.arrayBuffer()));
     out.push({ filename: f.name.slice(0, 200), mimeType: mime, sizeBytes: f.size, sha256: stored.sha256, storageKey: stored.key });
   }

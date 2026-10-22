@@ -26,7 +26,10 @@ export default async function CapacityPage({ searchParams }: { searchParams: Pro
   const excluded = new Set((sp.exclude ?? "").split(/[\s,;]+/).map((s) => s.toUpperCase()).filter(Boolean));
 
   const fleet = await fleetForecast(ctx, now);
-  let molds: CapacityMold[] = toCapacityMolds(fleet).filter((m) => !excluded.has(m.number.toUpperCase()));
+  // A what-if OEE or hours figure replaces every site's own value; otherwise each site's shift pattern applies.
+  let molds: CapacityMold[] = toCapacityMolds(fleet)
+    .filter((m) => !excluded.has(m.number.toUpperCase()))
+    .map((m) => ({ ...m, ...(sp.oee ? { oeePct: null } : {}), ...(sp.hours ? { hoursPerMonth: null } : {}) }));
   // What-if: a hypothetical extra mold for one product from a given month.
   const hpart = sp.hpart?.trim().toUpperCase();
   const hcav = num(sp.hcav, 0, 1, 256);
@@ -43,7 +46,7 @@ export default async function CapacityPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Planning" subtitle="Monthly demand per product against the capacity of the molds that make it: active cavities × 3600 / cycle time × hours × OEE, less refurbishment downtime and nothing after end of life." />
+      <PageHeader title="Planning" subtitle="Monthly demand per product against the capacity of the molds that make it: active cavities × 3600 / cycle time × hours × OEE, less refurbishment downtime and nothing after end of life. Hours and OEE come from each site's shift pattern where recorded, else the organisation defaults below." />
       <SubTabs tabs={PLANNING_TABS} active="/planning/capacity" />
       <FlashFromParams params={sp} />
       <Card title="What-if" className="mb-4">

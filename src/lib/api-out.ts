@@ -2,6 +2,7 @@ import "server-only";
 import type { Asset, AssetType, Cavity, Meter, Partner, Site, Transfer, TransferItem, WorkOrder, WorkOrderLabor, WorkOrderPart, Handover } from "@prisma/client";
 import { iso } from "./api";
 import { woCost } from "./maintenance";
+import { calculate, inputFromAsset, type Calc } from "./calc.pure";
 
 type AssetFull = Asset & { assetType: AssetType; site: Site; custodianPartner: Partner | null; ownerPartner: Partner | null; meters: Meter[]; cavities: Pick<Cavity, "status">[] };
 
@@ -9,7 +10,21 @@ export const assetInclude = { assetType: true, site: true, custodianPartner: tru
 
 const num = (v: unknown) => (v == null ? null : Number(v));
 
-export function assetOut(a: AssetFull) {
+/** Calculated fields as snake_case values (dates ISO, percentages 0–100); `missing` lists inputs for the rest. */
+export function calculatedOut(a: AssetFull, org: { cavityCosts: unknown; cavityCostCurrency: string }) {
+  if (a.assetType.kind !== "mold") return null;
+  const r = calculate(inputFromAsset(a, org));
+  const values: Record<string, unknown> = {};
+  const missing: Record<string, string[]> = {};
+  for (const [k, c] of [...Object.entries(r.lifecycle), ...Object.entries(r.capacity)] as [string, Calc<unknown>][]) {
+    const name = k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+    values[name] = c.value instanceof Date ? c.value.toISOString() : typeof c.value === "number" ? Math.round(c.value * 100) / 100 : c.value;
+    if (c.value == null && c.missing?.length) missing[name] = c.missing;
+  }
+  return { ...values, cost_currency: org.cavityCostCurrency, missing };
+}
+
+export function assetOut(a: AssetFull, org: { cavityCosts: unknown; cavityCostCurrency: string }) {
   const shots = a.meters.find((m) => m.kind === "shots");
   const activeCavities = a.cavities.length ? a.cavities.filter((c) => c.status === "active").length : a.designCavities;
   return {
@@ -41,6 +56,11 @@ export function assetOut(a: AssetFull) {
     requalification_required: a.requalificationReason || null,
     capital_value: num(a.capitalValue),
     cost_centre: a.costCentre,
+    process: a.process || null,
+    annual_volume: a.annualVolume,
+    utilization_pct: a.utilizationPct,
+    last_run_date: iso(a.lastRunDate),
+    calculated: calculatedOut(a, org),
     custom_fields: a.customValues,
     updated_at: a.updatedAt.toISOString(),
   };
