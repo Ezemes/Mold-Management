@@ -47,7 +47,8 @@ export function computeReading(meter: Pick<Meter, "offset" | "lastRawValue" | "l
     delta = r.rawValue - meter.lastRawValue;
   }
 
-  if (!r.confirmHigh && delta > 0 && meter.lastReadingAt && r.cycleTimeS && r.cycleTimeS > 0) {
+  // A replacement counter need not start at zero, so the time-based bound only applies to continuing counters.
+  if (!r.confirmHigh && !r.isReset && delta > 0 && meter.lastReadingAt && r.cycleTimeS && r.cycleTimeS > 0) {
     const elapsedS = (r.readAt.getTime() - meter.lastReadingAt.getTime()) / 1000;
     const maxPossible = Math.ceil((elapsedS / r.cycleTimeS) * 1.1) + 10;
     if (delta > maxPossible) {

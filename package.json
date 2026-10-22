@@ -11,7 +11,8 @@
     "test": "tsx --test src/lib/__tests__/*.test.ts",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test:e2e": "node e2e/acceptance.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
@@ -34,6 +35,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.5.4",
+    "playwright-core": "1.56.1",
     "prisma": "^6.16.2",
     "tailwindcss": "^4",
     "tsx": "^4.20.6",

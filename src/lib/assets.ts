@@ -35,6 +35,8 @@ export type StdField = {
   unit?: "mm" | "kg" | "g" | "t" | "s" | "shots";
   section: "Design" | "Life" | "Finance";
   kinds: Kind[];
+  /** Value stored when the input is left empty (for non-nullable columns). */
+  emptyValue?: number;
 };
 
 /** Standard typed fields. Custom fields live in Asset.customValues and FieldDef. */
@@ -55,7 +57,7 @@ export const STD_FIELDS: StdField[] = [
   { key: "warrantyShots", var: "warranty_shots", label: "Warranty shots", type: "int", unit: "shots", section: "Life", kinds: ["mold"] },
   { key: "shotsBetweenRefurbs", var: "shots_between_refurbs", label: "Shots between refurbishments", type: "int", unit: "shots", section: "Life", kinds: ["mold"] },
   { key: "refurbsAllowed", var: "refurbs_allowed", label: "Refurbishments allowed", type: "int", section: "Life", kinds: ["mold"] },
-  { key: "refurbsDone", var: "refurbs_done", label: "Refurbishments done", type: "int", section: "Life", kinds: ["mold"] },
+  { key: "refurbsDone", var: "refurbs_done", label: "Refurbishments done", type: "int", section: "Life", kinds: ["mold"], emptyValue: 0 },
   { key: "endOfLifeShots", var: "end_of_life_shots", label: "End-of-life shots", type: "int", unit: "shots", section: "Life", kinds: ["mold"] },
   { key: "capitalisationDate", var: "capitalisation_date", label: "Capitalisation date", type: "date", section: "Finance", kinds: ["mold", "press", "equipment"] },
   { key: "capitalValue", var: "capital_value", label: "Capital value", type: "money", section: "Finance", kinds: ["mold", "press", "equipment"] },

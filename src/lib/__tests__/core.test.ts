@@ -141,3 +141,15 @@ test("import: readings parsed in org time zone and validated in time order", () 
   assert.deepEqual(plans.map((p) => p.rawValue), [2000, 3000]);
   assert.deepEqual(errors.map((e) => e.row), [4, 5]);
 });
+
+test("readings: a reset is not subject to the time-based plausibility bound", () => {
+  const m = { offset: 0, lastRawValue: 413500, lastReadingAt: later(0), lifetimeTotal: 413500 };
+  const r = computeReading(m, { rawValue: 1000, readAt: later(0.01), source: "manual", isReset: true, resetReason: "Counter replaced", cycleTimeS: 45 }, later(1));
+  assert.deepEqual(r, { offset: 413500, delta: 1000, lifetime: 414500 });
+});
+
+test("values: empty inputs for non-nullable standard fields use their default", () => {
+  const r = readFieldValues((k) => (k === "refurbs_done" || k === "design_cavities" ? "" : undefined), "mold", []);
+  assert.equal(r.std.refurbsDone, 0);
+  assert.equal(r.std.designCavities, null);
+});

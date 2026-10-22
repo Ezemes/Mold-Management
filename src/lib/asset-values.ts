@@ -78,7 +78,7 @@ export function readFieldValues(
     const raw = get(f.var);
     if (raw === undefined) continue;
     const r = parseStd(f, raw);
-    if (r.ok) std[f.key] = f.type === "text" ? (r.value ?? "") : r.value;
+    if (r.ok) std[f.key] = f.type === "text" ? (r.value ?? "") : (r.value ?? f.emptyValue ?? null);
     else errors.push(r.error);
   }
   const custom: Record<string, unknown> = { ...existingCustom };

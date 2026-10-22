@@ -31,7 +31,7 @@ export function LinkButton({ variant = "primary", size = "md", className, ...p }
 
 export function Card({ className, children, title, actions }: { className?: string; children: ReactNode; title?: ReactNode; actions?: ReactNode }) {
   return (
-    <section className={cx("rounded-lg border border-gray-200 bg-white shadow-sm", className)}>
+    <section className={cx("min-w-0 rounded-lg border border-gray-200 bg-white shadow-sm", className)}>
       {(title || actions) && (
         <header className="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-3">
           <h2 className="text-sm font-semibold text-ink-900">{title}</h2>
@@ -162,8 +162,8 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <p className="text-xs font-medium uppercase tracking-wide text-ink-500">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-ink-900">{value}</p>
-      {hint && <p className="mt-1 text-xs text-ink-500">{hint}</p>}
+      <div className="mt-1 text-2xl font-semibold text-ink-900">{value}</div>
+      {hint && <div className="mt-1 text-xs text-ink-500">{hint}</div>}
     </div>
   );
 }
