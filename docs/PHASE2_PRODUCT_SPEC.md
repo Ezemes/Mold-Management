@@ -1,9 +1,9 @@
 # Phase 2 — Product Specification (draft for approval)
 
-Status: **DRAFT v0.1 — awaiting approval.** Date: 2026-10-22.
+Status: **v0.2 — decisions D1–D8 recorded 2026-10-22; awaiting final approval to start Phase 3a.**
 Inputs: `research/REA_FINDINGS_COAST.md` (public front-end analysis of the reference) and the original brief: "Unified EAM platform with specialized global mold management".
 
-Working name: **MMS** (Mold Management System). Final name and branding still to be decided (D1).
+Product name: **Plant Metrics Mold Management** (short form in this spec: **PMMM**). (D1)
 
 ## How to read this spec
 
@@ -21,13 +21,13 @@ Nothing is copied from the reference: no code, text, layout, naming or assets. R
 
 ## 1. Product vision
 
-OEMs and molders own thousands of injection molds spread across their own plants and a network of suppliers and molders. Today they lose track of **where a mold is, who has it, what condition it is in, how many shots it has left, and whether it can run on a given press**. MMS is the system of record for every mold through its life: build → qualification → production → maintenance and refurbishment → transfer → end of life. It also covers general plant equipment (EAM) on the same foundation.
+OEMs and molders own thousands of injection molds spread across their own plants and a network of suppliers and molders. Today they lose track of **where a mold is, who has it, what condition it is in, how many shots it has left, and whether it can run on a given press**. PMMM is the system of record for every mold through its life: build → qualification → production → maintenance and refurbishment → transfer → end of life. It also covers general plant equipment (EAM) on the same foundation.
 
 ### Goals (Phase 3 MVP success measures)
 
 1. Every mold has one **digital passport**: specs, components, documents and history in one place.
 2. Location **and** custody of every mold are known at all times, with a full chain-of-custody history across companies.
-3. Maintenance is triggered by **shot count**, not just the calendar, and refurbishment and end of life are forecast.
+3. Maintenance is triggered by **shot count** (entered manually, from handovers or by import), not just the calendar, and refurbishment and end of life are forecast.
 4. A planner can answer "which presses can run this mold?" and "do we have enough capacity next quarter?" in under a minute.
 5. Suppliers update the molds in their custody through a restricted portal, so data stays current without email chains.
 
@@ -90,7 +90,7 @@ Organisation (tenant)
 
 ### 3.2 The four separate concepts [N]
 
-The reference only shows location. MMS keeps four things apart, because in a supplier network they diverge:
+The reference only shows location. PMMM keeps four things apart, because in a supplier network they diverge:
 
 | Concept | Question it answers | Example |
 | --- | --- | --- |
@@ -154,10 +154,10 @@ Gap in the reference (no press entity). A press is an asset with: clamp tonnage,
 
 ### 4.3 Cycle counting and reconciliation [R]+[N]
 
-- **Sources:** manual entry (web/mobile), handover readings, CSV/ERP import, and **IIoT counters** via API/MQTT (§6). [R: IIoT aggregation exists in the reference]
+- **Sources:** manual entry (web/mobile with QR scan), handover readings, and CSV/XLSX import. **No sensor/IIoT integration** (D7); the public API accepts readings, so a sensor feed can be added later without data-model changes.
 - Readings are monotonic per counter. A reading lower than the last one requires a reason (counter replaced or reset) and creates an offset so the lifetime total stays continuous.
-- **Reconciliation [N]:** for each mold and period, compare IIoT shots, manual and handover readings, and production-reported parts ÷ active cavities. Gaps beyond tolerance raise a reconciliation exception for review.
-- **Production analytics [R]:** from IIoT data, compute run, idle, downtime, maintenance and quality time; actual vs design cycle time; parts produced vs possible; OEE when availability data exists.
+- **Reconciliation [N]:** for each mold and period, compare manual readings, handover readings and production-reported parts ÷ active cavities (when production quantities are imported). Gaps beyond tolerance raise a reconciliation exception for review.
+- **Production analytics [R]:** *deferred.* Run/idle/quality-time breakdowns need sensor data (out of scope per D7). The MVP reports shots per period, parts produced (shots × active cavities) and life consumed.
 
 ### 4.4 Maintenance [R]
 
@@ -188,7 +188,7 @@ Parts with OEM/manufacturer numbers, compatible assets, stock per site and bin, 
 
 ### 4.9 Downtime [R]
 
-Downtime events per asset with code/category, start and end, linked work order; MTBF and availability reporting. IIoT idle/down time can propose events for confirmation.
+Downtime events per asset with code/category, start and end, linked work order; MTBF and availability reporting. Events are entered manually or imported.
 
 ---
 
@@ -217,7 +217,7 @@ Mobile: responsive web for all technician and supplier flows in the MVP, with QR
 | Integration | Direction | MVP? |
 | --- | --- | --- |
 | **Public REST API** (OpenAPI documented, API keys per org, scoped tokens) | In/out | Yes |
-| **IIoT counters**: HTTPS ingestion endpoint + MQTT bridge; device ↔ asset mapping; idempotent, out-of-order tolerant | In | Yes |
+| IIoT counters (sensor ingestion, MQTT bridge, device ↔ asset mapping) | In | **No: not required (D7).** Possible later via the public API |
 | **CSV/XLSX import/export** for assets, parts, readings and BOMs, with dry-run validation | In/out | Yes |
 | **SSO**: SAML 2.0 / OIDC with group → role and group → site mapping | In | Yes |
 | **Webhooks** (transfer state changed, work order closed, threshold crossed) | Out | Yes |
@@ -228,7 +228,7 @@ Mobile: responsive web for all technician and supplier flows in the MVP, with QR
 
 ## 7. Notifications and alerts
 
-In-app plus email, with per-user preferences and daily digest. Triggers: assigned work, PM due/overdue, life thresholds (e.g. 80% / 95% of warranty or end-of-life shots), transfer actions needed, handover disputes, reconciliation exceptions, evaluation due, qualification approvals. Escalation if an action is not taken within its SLA.
+In-app plus email, with per-user preferences and daily digest. Triggers: assigned work, PM due/overdue, life thresholds (e.g. 80% / 95% of warranty or end-of-life shots), transfer actions needed, handover disputes, reconciliation exceptions, shot readings overdue (no reading for N days on an active mold), evaluation due, qualification approvals. Escalation if an action is not taken within its SLA.
 
 ---
 
@@ -245,9 +245,11 @@ Fleet size and status by site and partner · molds in transit and average transi
 | Tenancy | Multi-tenant with strict row-level isolation; partner users can belong to multiple tenants' supplier networks |
 | Security | SSO, MFA, passkeys; least-privilege roles; encryption in transit and at rest; signed URLs for documents; OWASP ASVS L2 |
 | Audit | Immutable audit log, exportable; 7-year retention (configurable) |
-| Scale | 100k assets and 10M meter readings per tenant; search < 1 s at p95; IIoT ingestion of 50 readings/s per tenant |
+| Scale | 100k assets and 5M meter readings per tenant; search < 1 s at p95 |
+| Hosting & data residency | **India** (D8): production and backups in an Indian cloud region (e.g. AWS ap-south-1 Mumbai, with ap-south-2 Hyderabad for disaster recovery); tenant data and documents stay in India |
+| Compliance | India's **Digital Personal Data Protection Act, 2023** (consent, purpose limitation, breach notification, data-principal rights); IT Act 2000 / CERT-In incident-reporting rules |
 | Availability | 99.9% monthly; daily backups with point-in-time recovery |
-| i18n | UI translatable (EN, DE, ES, ZH, PT at launch); metric/imperial units; per-site time zones; multi-currency costs |
+| i18n | English at launch with translatable UI (Hindi and other languages later); metric units by default (imperial optional); default time zone IST with per-site time zones for overseas suppliers; default currency INR with multi-currency costs; Indian number formatting (lakh/crore) as a user preference |
 | Accessibility | WCAG 2.1 AA |
 | Data portability | Full tenant export (JSON + files) on request |
 
@@ -255,7 +257,7 @@ Fleet size and status by site and partner · molds in transit and average transi
 
 ## 10. Proposed technical approach (for decision D4)
 
-Next.js (TypeScript) web app and REST API · PostgreSQL (row-level security per tenant) · Prisma · object storage for documents · a background job queue for triggers, IIoT aggregation, reports and email · MQTT bridge service for IIoT · OpenAPI-generated docs. This matches the stack already used for the `Ezemes/Marketing` project, so patterns (auth, roles, admin console, audit) can be reused.
+Next.js (TypeScript) web app and REST API · PostgreSQL (row-level security per tenant) · Prisma · object storage for documents · a background job queue for triggers, reports and email · OpenAPI-generated docs · hosted in an Indian region (D8). This matches the stack already used for the `Ezemes/Marketing` project, so patterns (auth, roles, admin console, audit) can be reused.
 
 ---
 
@@ -266,8 +268,8 @@ Next.js (TypeScript) web app and REST API · PostgreSQL (row-level security per 
 | **3a — Foundation** (MVP core) | Tenancy, sites, partners, users/roles/scopes, audit · asset types and custom fields · mold passport · documents · manual meter readings · import/export |
 | **3b — Operations** | Transfers with handovers and chain of custody · maintenance plans, triggers, work orders, checklists · supplier portal · notifications |
 | **3c — Engineering & planning** | Presses and compatibility · condition evaluation · qualification · spare parts · budget · EOL forecast · capacity plan · reports |
-| **3d — Connectivity** | Public API, webhooks, IIoT ingestion and reconciliation, SSO |
-| **4** | Native mobile/offline, ERP connectors, BI connectors, AI assistance (anomaly detection on cycle data, natural-language search) |
+| **3d — Connectivity** | Public API, webhooks, shot reconciliation, SSO |
+| **4** | Native mobile/offline app (D6), ERP connectors, BI connectors, optional sensor/IIoT ingestion, AI assistance (natural-language search, anomaly detection) |
 
 Each phase ends with acceptance tests (§12) passing, demo data, and user documentation.
 
@@ -279,22 +281,22 @@ Each phase ends with acceptance tests (§12) passing, demo data, and user docume
 2. A transfer from an OEM plant to a supplier goes through every state; the supplier user sees the mold only after acceptance; shot count and condition are captured at both handovers; a shot mismatch beyond tolerance creates a dispute.
 3. A shot-based PM trigger creates a work order automatically when the counter crosses the threshold (warning first at the lead percentage).
 4. For a mold needing 450 t, the compatibility finder excludes a 400 t press and shows why.
-5. An IIoT device posting counter readings updates the mold's shots within 1 minute; a duplicated or out-of-order post does not double-count.
+5. A technician scans a mold's QR code on a phone, enters a shot reading, and the passport's counters and trigger status update immediately; a reading lower than the last one is rejected unless a counter-reset reason is given.
 6. Every custody change appears in the audit log and the chain-of-custody report.
 7. A supplier user cannot see molds outside their custody or open any admin screen.
 
 ---
 
-## 13. Decisions needed before Phase 3
+## 13. Decisions
 
-| # | Decision | Recommendation |
+| # | Decision | Outcome (2026-10-22) |
 | --- | --- | --- |
-| D1 | Product name and branding | Pick an original name (not "COAST") |
-| D2 | MVP scope: mold-first, or mold + general EAM equally | **Mold-first**; general equipment uses the same asset model with fewer features |
-| D3 | Custody during transit: sender keeps it until receipt, or "in transit" state holds it | **Sender keeps custody until receipt** (clear liability) |
-| D4 | Tech stack (§10) | Next.js + PostgreSQL, as proposed |
-| D5 | Supplier portal: separate app, or same app with restricted role | **Same app, restricted role and simplified navigation** |
-| D6 | Mobile: responsive web only for MVP, or native app | **Responsive web + QR scan** for MVP |
-| D7 | IIoT: which device vendors/protocols must be supported first | Need customer input |
-| D8 | Hosting region(s) and data residency | Need customer input |
-| D9 | Reference access: if written authorization from COAST or a licensed tenant becomes available, should authenticated analysis be done to close the remaining gaps? | Optional; the spec does not depend on it |
+| D1 | Product name | **Plant Metrics Mold Management** |
+| D2 | MVP scope | **Mold-first**; general equipment uses the same asset model with fewer features |
+| D3 | Custody during transit | **Sender stays responsible until the receiver confirms receipt** |
+| D4 | Tech stack | **Next.js (TypeScript) + PostgreSQL**, as in §10 |
+| D5 | Supplier portal | **Same app, restricted role and simplified navigation** |
+| D6 | Mobile | **Responsive web with QR scanning** for the MVP; native app in Phase 4 |
+| D7 | Sensors / IIoT | **Not required.** Shot counts come from manual entry, handovers and imports |
+| D8 | Hosting | **India** (data residency in Indian region; DPDP Act compliance) |
+| D9 | Authenticated reference analysis | Open, optional; the spec does not depend on it |
