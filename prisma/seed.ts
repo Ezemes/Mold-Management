@@ -73,8 +73,11 @@ async function main() {
       const a = await tx.asset.create({
         data: {
           orgId: org.id, assetTypeId: types.mold.id, number, name, qrToken: randomBytes(12).toString("hex"), siteId, custodianPartnerId: site.partnerId ?? null,
-          toolmakerPartnerId: precision.id, program: "Tata Nexon facelift", designCavities: cav, designCycleTimeS: cycle, shotWeightG: cav * 18, material: "PP-TD20",
-          clampTonnageT: cav >= 8 ? 350 : 220, warrantyShots: warranty, shotsBetweenRefurbs: Math.round(eol / 3), refurbsAllowed: 2, endOfLifeShots: eol,
+          toolmakerPartnerId: precision.id, program: "Tata Nexon facelift", designCavities: cav, designCycleTimeS: cycle, material: "PP-TD20",
+          clampTonnageT: number === "M-0003" ? 450 : cav >= 8 ? 350 : 220, hotRunnerZones: number === "M-0003" ? 8 : null,
+          // Sized so the compatibility finder has something to show (spec acceptance 4: M-0003 needs 450 t).
+          shotWeightG: cav * 45, widthMm: 400 + cav * 15, heightMm: 450 + cav * 10, stackHeightMm: 350 + cav * 10, openingStrokeMm: 250, locatingRingMm: 125, sprueRadiusMm: 15.5, weightKg: 600 + cav * 100,
+          warrantyShots: warranty, shotsBetweenRefurbs: Math.round(eol / 3), refurbsAllowed: 2, endOfLifeShots: eol,
           buildDate: new Date("2023-04-01"), capitalValue: cav * 350_000, costCentre: "CC-AUTO-01",
           customValues: { steel_grade: steel, gate_type: "Submarine" } as Prisma.InputJsonValue,
         },
@@ -134,9 +137,55 @@ async function main() {
     await tx.workOrderLabor.create({ data: { workOrderId: done.id, userId: tech.id, workerName: "Suresh Patil", hours: 6, rate: 450 } });
     await tx.workOrderPart.create({ data: { workOrderId: done.id, partNumber: "EJ-6x150", description: "Ejector pin 6 × 150", quantity: 4, unitCost: 380 } });
 
-    const press = await tx.asset.create({ data: { orgId: org.id, assetTypeId: types.press.id, number: "P-0001", name: "Engel 350t #1", qrToken: randomBytes(12).toString("hex"), siteId: pune.id, clampTonnageT: 350, hotRunnerZones: 12 } });
-    void press;
-  });
+    // ── Presses (spec §4.2) and one approved pair from a passed qualification
+    const pressSpec = (number: string, name: string, siteId: string, t: number, tie: number, platen: number, hMin: number, hMax: number, opening: number, shot: number, zones: number, maxKg: number) =>
+      tx.asset.create({
+        data: {
+          orgId: org.id, assetTypeId: types.press.id, number, name, qrToken: randomBytes(12).toString("hex"), siteId, custodianPartnerId: [chakan].find((x) => x.id === siteId)?.partnerId ?? null,
+          clampTonnageT: t, tieBarHMm: tie, tieBarVMm: tie, platenWMm: platen, platenHMm: platen, minMoldHeightMm: hMin, maxMoldHeightMm: hMax, maxOpeningMm: opening, shotCapacityG: shot,
+          locatingRingMm: 125, nozzleRadiusMm: 15, hotRunnerZones: zones, maxMoldWeightKg: maxKg,
+        },
+      });
+    const p1 = await pressSpec("P-0001", "Engel 350t #1", pune.id, 350, 570, 820, 250, 550, 500, 400, 8, 2500);
+    await pressSpec("P-0002", "JSW 450t", pune.id, 450, 660, 960, 300, 650, 600, 1000, 16, 4000);
+    await pressSpec("P-0003", "Milacron 400t", chennai.id, 400, 620, 900, 250, 600, 550, 900, 12, 3000);
+    await pressSpec("P-0004", "Haitian 250t", chakan.id, 250, 510, 750, 200, 500, 450, 400, 4, 1500);
+    const m1 = await tx.asset.findFirstOrThrow({ where: { orgId: org.id, number: "M-0001" } });
+    const q1 = await tx.qualification.create({
+      data: {
+        orgId: org.id, number: "Q-0001", assetId: m1.id, pressId: p1.id, siteId: pune.id, status: "passed", createdById: tooling.id, createdAt: new Date(Date.now() - 200 * day), closedAt: new Date(Date.now() - 180 * day),
+        stages: { create: ["IQ", "OQ", "PQ"].map((stage, i) => ({ stage, status: "passed", ownerId: tooling.id, actualDate: new Date(Date.now() - (195 - i * 7) * day), result: stage === "PQ" ? "3 × 8 h runs at 45 s, Cpk 1.5 on critical dimensions" : `${stage} complete`, approvedById: admin.id, approvedAt: new Date(Date.now() - (195 - i * 7) * day) })) },
+      },
+    });
+    await tx.moldPress.create({ data: { orgId: org.id, moldId: m1.id, pressId: p1.id, qualificationId: q1.id, approvedById: admin.id, approvedAt: new Date(Date.now() - 180 * day), notes: "Cycle 45 s" } });
+    await tx.asset.update({ where: { id: m1.id }, data: { conditionScore: 4.2, conditionDate: new Date(Date.now() - 30 * day), nextEvaluationDate: new Date(Date.now() + 150 * day) } });
+    await tx.conditionEvaluation.create({
+      data: {
+        orgId: org.id, assetId: m1.id, status: "approved", score: 4.2, evaluatedById: tech.id, evaluatedAt: new Date(Date.now() - 30 * day), decidedById: admin.id, decidedAt: new Date(Date.now() - 29 * day),
+        scores: [["parting_line", "Parting line", 3, 4], ["cavity_surfaces", "Cavity and core surfaces", 3, 5], ["vents", "Vents", 2, 4], ["cooling", "Cooling circuits", 2, 4], ["ejectors", "Ejector pins and plates", 2, 4], ["hot_runner", "Hot runner", 2, null], ["slides", "Slides and lifters", 1, 4], ["guiding", "Guide pillars and bushes", 1, 4]].map(([key, label, weight, score]) => ({ key, label, weight, score, note: "" })) as Prisma.InputJsonValue,
+      },
+    });
+    const m4 = await tx.asset.findFirstOrThrow({ where: { orgId: org.id, number: "M-0004" } });
+    await tx.asset.update({ where: { id: m4.id }, data: { requalificationReason: "Moved to Brightway Chakan" } });
+
+    // ── Spare parts with stock; the thermocouple is below its reorder point
+    await tx.assetType.update({ where: { id: types.mold.id }, data: { budgetRules: { pmCostPerService: 12_000, partsPerCavity: 3_000, refurbCost: 250_000, replacementCost: 1_200_000 } } });
+    const part = async (number: string, name: string, category: string, cost: number, siteId: string, qty: number, reorder: number, max: number, assets: string[]) => {
+      const p = await tx.part.create({ data: { orgId: org.id, number, name, category, unitCost: cost, reorderPoint: reorder, maxQty: max, assets: { create: assets.map((n) => ({ assetId: byNum[n].id })) } } });
+      await tx.stock.create({ data: { partId: p.id, siteId, quantity: qty, reorderPoint: reorder, maxQty: max, bin: "A-01" } });
+      await tx.stockMove.create({ data: { orgId: org.id, partId: p.id, siteId, kind: "receipt", quantity: qty, balanceAfter: qty, unitCost: cost, reference: "Opening stock", userId: tooling.id } });
+    };
+    await part("EJ-6X150", "Ejector pin 6 × 150", "Ejectors", 380, pune.id, 40, 20, 100, ["M-0001", "M-0002"]);
+    await part("HR-TC-J", "Hot-runner thermocouple, type J", "Hot runner", 1_450, pune.id, 3, 5, 20, ["M-0003"]);
+    await part("OR-KIT-12", "Cooling O-ring kit", "Cooling", 650, chennai.id, 10, 4, 20, ["M-0006"]);
+
+    // ── Demand for the next six months: M-0005 runs out of life, so its part goes short.
+    const first = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    for (let i = 0; i < 6; i++) {
+      const month = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + i, 1));
+      await tx.productDemand.createMany({ data: [["TN-0001-A", 40_000], ["TN-0003-A", 400_000], ["TN-0005-A", 1_200_000]].map(([partNumber, quantity]) => ({ orgId: org.id, partNumber: partNumber as string, month, quantity: quantity as number })) });
+    }
+  }, { timeout: 60_000 });
   console.log(`Demo data created. Password for all users: ${PASSWORD}
   admin@sharma.example        Org Admin
   tooling@sharma.example      Tooling Manager

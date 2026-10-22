@@ -1,6 +1,6 @@
 # Phase 2 — Product Specification (draft for approval)
 
-Status: **v1.0 — approved 2026-10-22. Phases 3a (Foundation) and 3b (Transfers, Maintenance, Supplier workflow) built; see README.**
+Status: **v1.0 — approved 2026-10-22. Phases 3a (Foundation), 3b (Operations) and 3c (Engineering & planning) built; see README.**
 Inputs: `research/REA_FINDINGS_COAST.md` (public front-end analysis of the reference) and the original brief: "Unified EAM platform with specialized global mold management".
 
 Product name: **Plant Metrics Mold Management** (short form in this spec: **PMMM**). (D1)

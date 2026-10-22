@@ -2,7 +2,7 @@
 
 System of record for injection molds across your plants and supplier network: where each mold is, who has custody, how many shots it has run, its condition, and its full history. General plant equipment uses the same asset model.
 
-**Status:** Phase 3a (Foundation) and Phase 3b (Transfers, Maintenance, Supplier workflow) are built and pass their acceptance suites. The approved specification is `docs/PHASE2_PRODUCT_SPEC.md`. Background research is in `research/`.
+**Status:** Phases 3a (Foundation), 3b (Transfers, Maintenance, Supplier workflow) and 3c (Engineering & planning) are built and pass their acceptance suites. The approved specification is `docs/PHASE2_PRODUCT_SPEC.md`. Background research is in `research/`.
 
 ## What Phase 3a includes
 
@@ -59,7 +59,51 @@ System of record for injection molds across your plants and supplier network: wh
   - Each alert is deduplicated, so repeats are suppressed.
   - The daily job runs triggers and overdue checks: `POST /api/cron/daily` with `Authorization: Bearer $CRON_SECRET`, called once a day from the host's scheduler.
 
-Not yet built, planned per the spec: presses and compatibility (3c), planning (3c), API and webhooks (3d).
+## What Phase 3c adds
+
+- **Presses and compatibility:**
+  - Presses are assets with tonnage, tie-bar spacing, platen size, mold-height range, opening stroke, shot capacity, locating ring, nozzle radius, hot-runner zones and maximum mold weight. Molds gain height, opening, locating-ring and sprue-bush fields.
+  - The **compatibility finder** checks a mold against every press, or a press against every mold.
+    - Every failed rule gives its reason, e.g. "Clamp tonnage: Needs 450 t, press has 400 t". Missing data is reported as "not checked" and never fails.
+    - Rules can be switched on or off, with a tonnage margin, shot-size window and locating-ring tolerance, under Settings.
+  - **Approved pairs** come only from a passed PQ. They can be withdrawn with a reason.
+  - Internal users can compare against every press in the organisation; suppliers see only their own.
+- **Quality:**
+  - **Condition evaluations** score weighted criteria per asset type from 1 to 5.
+    - Scores of 2 or below need a note, and photos can be attached.
+    - Evaluations are submitted, then approved or rejected.
+    - An approved score updates the passport and schedules the next evaluation. If it falls below the type's threshold, a corrective work order is raised.
+    - The daily job alerts when an evaluation is due.
+  - **Qualification** runs IQ → OQ → PQ, with an owner, planned and actual dates, a result, a linked work order and a sign-off for each stage.
+    - It can't start on a press that fails the compatibility rules.
+    - Passing PQ approves the mold–press pair.
+  - **Re-qualification** is flagged when custody moves to another site (a setting) and when a modification work order is completed; a modification also withdraws the approved pairs.
+- **Spare parts:**
+  - A parts catalogue (manufacturer numbers, linked assets, shelf life) with stock per site and bin, and min, reorder and max levels.
+  - A ledger records receipts, issues to work orders, returns, moves between sites and counted adjustments (with a reason).
+  - Work orders issue parts from the asset's site stock. A stock update can never go below zero, even with simultaneous issues. Removing an issued line returns the stock.
+  - A **reorder list** exports as a purchase-request CSV for the ERP.
+- **Planning:**
+  - **Life forecast:** shots per month from the last 90 days of readings, giving the next refurbishment, warranty end and end-of-life dates for every mold.
+  - **Capacity plan:** 12 months of demand per product (CSV import) against mold capacity (active cavities × 3600 ÷ cycle time × hours × OEE).
+    - The forecast refurbishment month loses its downtime days, and a mold adds no capacity after its end of life. Family molds use the cavities per part.
+    - Shortfall months are shown in red.
+    - **What-if** (not saved): change OEE or hours, take molds out, or add a hypothetical mold from a chosen month.
+  - **Budget:**
+    - Set rules per asset type, then generate per asset and year in bulk: PM services from the plans and shot rate, parts per cavity, and refurbishment and replacement from the life forecast.
+    - Manual adjustments need a reason, are audited and survive regeneration.
+    - **Budget vs actual** draws on completed work-order costs.
+- **Reports (CSV export):**
+  - fleet status by site
+  - custody by partner
+  - life consumed
+  - refurbishment and end of life in the next 90 days
+  - maintenance cost per mold and per 1,000 shots
+  - budget vs actual
+  - transfer routes and average transit days
+  - passport data quality with a fleet completeness score
+
+Not yet built, planned per the spec: public API, webhooks, shot reconciliation and SSO (3d); downtime events (§4.9).
 
 ## Stack
 
@@ -89,14 +133,15 @@ To start without demo data, register at `/register`; you become the organisation
 ## Tests
 
 ```bash
-npm test             # unit tests: formulas, shot-counter rules, field parsing, time zones, CSV import planning
+npm test             # unit tests (33): formulas, shot counters, CSV import, transfers, maintenance, compatibility, quality, stock, planning
 npm run test:e2e     # Phase 3a browser acceptance suite (31 checks) against a running app
 npm run test:e2e:3b  # Phase 3b suite (36 checks): transfers, disputes, triggers, work orders, quarantine, supplier
+npm run test:e2e:3c  # Phase 3c suite (34 checks): compatibility, qualification, evaluations, stock, planning, reports
 ```
 
 Reset the test database before each suite with `e2e/reset-db.sh <DATABASE_URL>` (drops, migrates and seeds it), then restart the app so it opens fresh connections. The 3b suite also needs `CRON_SECRET` set to the same value as the app.
 
-The e2e suite needs a **fresh** seeded database, `DATABASE_URL` pointing at it, `psql` on `PATH`, and Chromium (`CHROMIUM_PATH`, default `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`; `BASE_URL` defaults to `http://localhost:3000`). It covers spec acceptance criteria 1 (custom field plus 1,000-mold import with dry run), 5 (QR → reading, backwards rejected without reset) and 7 (supplier sees only their custody and cannot reach admin), plus site scoping, documents, formulas and audit immutability. The 3b suite covers criteria 2 (transfer with handover counts, dispute and resolution), 3 (shot trigger warns, then raises one work order) and 6 (every custody change audited and shown on the passport).
+The e2e suite needs a **fresh** seeded database, `DATABASE_URL` pointing at it, `psql` on `PATH`, and Chromium (`CHROMIUM_PATH`, default `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`; `BASE_URL` defaults to `http://localhost:3000`). It covers spec acceptance criteria 1 (custom field plus 1,000-mold import with dry run), 5 (QR → reading, backwards rejected without reset) and 7 (supplier sees only their custody and cannot reach admin), plus site scoping, documents, formulas and audit immutability. The 3b suite covers criteria 2 (transfer with handover counts, dispute and resolution), 3 (shot trigger warns, then raises one work order) and 6 (every custody change audited and shown on the passport). The 3c suite covers criterion 4 (a 450 t mold is excluded from a 400 t press, with the reason).
 
 ## Deployment notes (India, spec D8)
 
@@ -121,7 +166,12 @@ src/lib/importer.ts           CSV import planning (pure, unit-tested)
 src/lib/transfers*.ts         Transfer state machine, approval policy, handover reconciliation
 src/lib/maintenance*.ts       Task syntax, checklist rules, plan state, compliance metrics; trigger engine
 src/lib/notify.ts             Alert recipients by permission and scope, deduped notifications + email
-src/lib/daily.ts              Daily job: triggers, overdue readings, overdue work, late transfers
+src/lib/daily.ts              Daily job: triggers, overdue readings, overdue work, late transfers, evaluations due
+src/lib/compat*.ts            Press compatibility rules engine (pure) and finder queries
+src/lib/quality*.ts           Weighted condition scores, IQ/OQ/PQ stage rules, re-qualification
+src/lib/inventory*.ts         Stock rules (pure) and the atomic stock move
+src/lib/planning*.ts          Shot rate, life forecast, budget rules, capacity (pure) and fleet queries
+src/lib/reports.ts            Standard reports (shared by the pages and CSV export)
 src/app/(auth)/               Register, verify email, login, reset password, accept invite
 src/app/(app)/assets/         Asset list, passport, create/edit, QR tag
 src/app/(app)/admin/          Sites, partners, asset types, users, roles, audit, settings
@@ -129,6 +179,11 @@ src/app/(app)/import-export/  CSV import (dry run → apply) and exports
 src/app/(app)/transfers/      Transfer list, request, approve, dispatch, receive, disputes
 src/app/(app)/maintenance/    Work orders, plans, templates, compliance report
 src/app/(app)/notifications/  Alerts
+src/app/(app)/presses/        Press registry, compatibility finder, approved pairs
+src/app/(app)/quality/        Condition evaluations, qualifications, criteria
+src/app/(app)/inventory/      Parts, stock by site, ledger, reorder list
+src/app/(app)/planning/       Life forecast, capacity plan, budget
+src/app/(app)/reports/        Standard reports
 src/app/api/cron/daily/       Daily job endpoint
 e2e/                          Browser acceptance suite
 ```

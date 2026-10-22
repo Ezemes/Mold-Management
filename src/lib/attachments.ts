@@ -19,6 +19,6 @@ export async function storeUploads(orgId: string, files: FormDataEntryValue[], m
   return out;
 }
 
-export async function saveAttachments(tx: Prisma.TransactionClient, orgId: string, ownerType: "handover" | "work_order", ownerId: string, rows: Awaited<ReturnType<typeof storeUploads>>, userId: string) {
+export async function saveAttachments(tx: Prisma.TransactionClient, orgId: string, ownerType: "handover" | "work_order" | "evaluation", ownerId: string, rows: Awaited<ReturnType<typeof storeUploads>>, userId: string) {
   if (rows.length) await tx.attachment.createMany({ data: rows.map((r) => ({ ...r, orgId, ownerType, ownerId, uploadedById: userId })) });
 }

@@ -9,6 +9,8 @@ import { notify, recipientsFor } from "@/lib/notify";
 import { AttachmentError, saveAttachments, storeUploads } from "@/lib/attachments";
 import { parseDate } from "@/lib/asset-values";
 import { str } from "@/lib/forms";
+import { flagRequalification } from "@/lib/quality";
+import { moveStock, parseQty, StockError } from "@/lib/inventory";
 import {
   checklistFromTemplate,
   checklistSummary,
@@ -339,6 +341,7 @@ async function saveOrComplete(fd: FormData, complete: boolean) {
     if (wo.planId) await tx.maintenancePlan.update({ where: { id: wo.planId }, data: { baselineShots: doneShots ?? wo.plan?.baselineShots ?? 0, baselineDate: now, warnedAt: null } });
     const assetData: Prisma.AssetUpdateInput = {};
     if (wo.type === "refurbishment") Object.assign(assetData, { lastRefurbShots: doneShots, lastRefurbDate: now, refurbsDone: { increment: 1 } });
+    if (wo.type === "modification") await flagRequalification(tx, { orgId: ctx.org.id, userId: ctx.user.id }, wo.asset, `Modified by ${wo.number}`, { revokePairs: true });
     const otherOpen = await tx.workOrder.count({ where: { assetId: wo.assetId, id: { not: wo.id }, status: { in: OPEN_WO }, OR: [{ type: "refurbishment" }, { clearsQuarantine: true }] } });
     let newStatus: string | null = null;
     if (wo.clearsQuarantine && wo.asset.status === "quarantined" && !otherOpen) newStatus = "active";
@@ -397,6 +400,32 @@ export async function addPartAction(fd: FormData) {
   back(path, "Part added.", "ok");
 }
 
+/** Issue a catalogue part from the stock at the asset's site; the ledger links the issue to this work order. */
+export async function issueStockAction(fd: FormData) {
+  const ctx = await requireOrg();
+  assertCan(ctx, "maintenance", "edit");
+  assertCan(ctx, "inventory", "edit");
+  const wo = await loadWo(ctx, str(fd, "id"));
+  const path = `/maintenance/work-orders/${wo.id}`;
+  if (ctx.isSupplier || !OPEN_WO.includes(wo.status)) back(path, "Stock can only be issued to open work orders by the organisation.");
+  const part = await db.part.findFirst({ where: { id: str(fd, "partId"), orgId: ctx.org.id, active: true } });
+  if (!part) back(path, "Choose a part.");
+  const quantity = parseQty(str(fd, "quantity"));
+  if (quantity == null) back(path, "Quantity must be above zero.");
+  let error = "";
+  try {
+    await db.$transaction(async (tx) => {
+      await moveStock(tx, { orgId: ctx.org.id, partId: part.id, siteId: wo.asset.siteId, kind: "issue", quantity: -quantity, workOrderId: wo.id, reference: wo.number, userId: ctx.user.id });
+      await tx.workOrderPart.create({ data: { workOrderId: wo.id, partNumber: part.number, description: part.name, quantity, unitCost: part.unitCost, partId: part.id, siteId: wo.asset.siteId } });
+    });
+  } catch (e) {
+    if (!(e instanceof StockError)) throw e;
+    error = e.message;
+  }
+  if (error) back(path, error);
+  back(path, `Issued ${quantity.toLocaleString("en-IN")} ${part.unit} of ${part.number} from stock.`, "ok");
+}
+
 export async function removeCostLineAction(fd: FormData) {
   const ctx = await requireOrg();
   assertCan(ctx, "maintenance", "edit");
@@ -404,7 +433,15 @@ export async function removeCostLineAction(fd: FormData) {
   const path = `/maintenance/work-orders/${wo.id}`;
   if (!canWork(ctx, wo) || !OPEN_WO.includes(wo.status)) back(path, "This work order is closed.");
   if (str(fd, "kind") === "labor") await db.workOrderLabor.deleteMany({ where: { id: str(fd, "lineId"), workOrderId: wo.id } });
-  else await db.workOrderPart.deleteMany({ where: { id: str(fd, "lineId"), workOrderId: wo.id } });
+  else {
+    const line = await db.workOrderPart.findFirst({ where: { id: str(fd, "lineId"), workOrderId: wo.id } });
+    if (!line) back(path, "Line not found.");
+    await db.$transaction(async (tx) => {
+      // Parts issued from stock go back to the shelf they came from.
+      if (line.partId && line.siteId) await moveStock(tx, { orgId: ctx.org.id, partId: line.partId, siteId: line.siteId, kind: "return", quantity: line.quantity, workOrderId: wo.id, reference: wo.number, userId: ctx.user.id });
+      await tx.workOrderPart.delete({ where: { id: line.id } });
+    });
+  }
   back(path, "Removed.", "ok");
 }
 

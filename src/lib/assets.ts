@@ -33,7 +33,7 @@ export type StdField = {
   label: string;
   type: "text" | "int" | "float" | "date" | "money";
   unit?: "mm" | "kg" | "g" | "t" | "s" | "shots";
-  section: "Design" | "Life" | "Finance";
+  section: "Design" | "Press" | "Life" | "Finance";
   kinds: Kind[];
   /** Value stored when the input is left empty (for non-nullable columns). */
   emptyValue?: number;
@@ -53,6 +53,20 @@ export const STD_FIELDS: StdField[] = [
   { key: "weightKg", var: "weight_kg", label: "Weight", type: "float", unit: "kg", section: "Design", kinds: ["mold", "press", "equipment"] },
   { key: "hotRunnerZones", var: "hot_runner_zones", label: "Hot-runner zones", type: "int", section: "Design", kinds: ["mold", "press"] },
   { key: "coolingCircuits", var: "cooling_circuits", label: "Cooling circuits", type: "int", section: "Design", kinds: ["mold"] },
+  { key: "stackHeightMm", var: "stack_height_mm", label: "Mold height (shut)", type: "float", unit: "mm", section: "Design", kinds: ["mold"] },
+  { key: "openingStrokeMm", var: "opening_stroke_mm", label: "Opening stroke needed", type: "float", unit: "mm", section: "Design", kinds: ["mold"] },
+  { key: "locatingRingMm", var: "locating_ring_mm", label: "Locating ring diameter", type: "float", unit: "mm", section: "Design", kinds: ["mold", "press"] },
+  { key: "sprueRadiusMm", var: "sprue_radius_mm", label: "Sprue bush radius", type: "float", unit: "mm", section: "Design", kinds: ["mold"] },
+  { key: "tieBarHMm", var: "tie_bar_h_mm", label: "Tie-bar spacing (horizontal)", type: "float", unit: "mm", section: "Press", kinds: ["press"] },
+  { key: "tieBarVMm", var: "tie_bar_v_mm", label: "Tie-bar spacing (vertical)", type: "float", unit: "mm", section: "Press", kinds: ["press"] },
+  { key: "platenWMm", var: "platen_w_mm", label: "Platen width", type: "float", unit: "mm", section: "Press", kinds: ["press"] },
+  { key: "platenHMm", var: "platen_h_mm", label: "Platen height", type: "float", unit: "mm", section: "Press", kinds: ["press"] },
+  { key: "minMoldHeightMm", var: "min_mold_height_mm", label: "Min mold height", type: "float", unit: "mm", section: "Press", kinds: ["press"] },
+  { key: "maxMoldHeightMm", var: "max_mold_height_mm", label: "Max mold height", type: "float", unit: "mm", section: "Press", kinds: ["press"] },
+  { key: "maxOpeningMm", var: "max_opening_mm", label: "Max opening stroke", type: "float", unit: "mm", section: "Press", kinds: ["press"] },
+  { key: "shotCapacityG", var: "shot_capacity_g", label: "Shot capacity", type: "float", unit: "g", section: "Press", kinds: ["press"] },
+  { key: "nozzleRadiusMm", var: "nozzle_radius_mm", label: "Nozzle radius", type: "float", unit: "mm", section: "Press", kinds: ["press"] },
+  { key: "maxMoldWeightKg", var: "max_mold_weight_kg", label: "Max mold weight", type: "float", unit: "kg", section: "Press", kinds: ["press"] },
   { key: "buildDate", var: "build_date", label: "Build date", type: "date", section: "Life", kinds: ["mold", "press", "equipment"] },
   { key: "warrantyShots", var: "warranty_shots", label: "Warranty shots", type: "int", unit: "shots", section: "Life", kinds: ["mold"] },
   { key: "shotsBetweenRefurbs", var: "shots_between_refurbs", label: "Shots between refurbishments", type: "int", unit: "shots", section: "Life", kinds: ["mold"] },

@@ -1,10 +1,10 @@
 import { db } from "@/lib/db";
-import { requireOrg } from "@/lib/auth";
+import { assetScope, requireOrg } from "@/lib/auth";
 import { transferScope } from "@/lib/transfers";
 import { workOrderScope } from "@/lib/work-orders";
 import { getFile } from "@/lib/storage";
 
-/** Download a handover or work-order attachment, only if its parent is in the user's scope. */
+/** Download a handover, work-order or evaluation attachment, only if its parent is in the user's scope. */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await requireOrg();
@@ -13,7 +13,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const visible =
     a.ownerType === "handover"
       ? ctx.can("transfers") && !!(await db.handover.findFirst({ where: { id: a.ownerId, item: { transfer: transferScope(ctx) } } }))
-      : ctx.can("maintenance") && !!(await db.workOrder.findFirst({ where: { AND: [workOrderScope(ctx), { id: a.ownerId }] } }));
+      : a.ownerType === "evaluation"
+        ? ctx.can("quality") && !!(await db.conditionEvaluation.findFirst({ where: { id: a.ownerId, asset: assetScope(ctx) } }))
+        : ctx.can("maintenance") && !!(await db.workOrder.findFirst({ where: { AND: [workOrderScope(ctx), { id: a.ownerId }] } }));
   if (!visible) return new Response("Not found", { status: 404 });
   const bytes = await getFile(a.storageKey);
   const inline = /^(image\/|application\/pdf)/.test(a.mimeType);

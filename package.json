@@ -13,7 +13,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "postinstall": "prisma generate",
     "test:e2e": "node e2e/acceptance.mjs",
-    "test:e2e:3b": "node e2e/phase3b.mjs"
+    "test:e2e:3b": "node e2e/phase3b.mjs",
+    "test:e2e:3c": "node e2e/phase3c.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",

@@ -7,7 +7,7 @@ import { label } from "@/lib/labels";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum } from "@/lib/format";
 import { Badge, Card, cx, Field, FlashFromParams, Input, Notice, PageHeader, Select, Table, Td, Textarea } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
-import { addLaborAction, addPartAction, assignWorkOrderAction, cancelWorkOrderAction, completeWorkOrderAction, removeCostLineAction, saveWorkOrderAction, workOrderStatusAction } from "../../actions";
+import { addLaborAction, addPartAction, issueStockAction, assignWorkOrderAction, cancelWorkOrderAction, completeWorkOrderAction, removeCostLineAction, saveWorkOrderAction, workOrderStatusAction } from "../../actions";
 import { assigneeOptions } from "../assignees";
 
 const RESULT_COLOR = { pass: "green", fail: "red", na: "gray" } as const;
@@ -55,6 +55,13 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
       : Promise.resolve(null),
   ]);
   const open = OPEN_WO.includes(wo.status);
+  const stock = open && !ctx.isSupplier && ctx.can("inventory", "edit")
+    ? await db.stock.findMany({ where: { siteId: wo.asset.siteId, quantity: { gt: 0 }, part: { active: true } }, include: { part: { include: { assets: { where: { assetId: wo.assetId } } } } }, orderBy: { part: { number: "asc" } } })
+    : [];
+  // Parts listed for this asset come first.
+  const stockParts = stock
+    .sort((a, b) => b.part.assets.length - a.part.assets.length)
+    .map((s) => [s.partId, `${s.part.assets.length ? "★ " : ""}${s.part.number} ${s.part.name} (${s.quantity.toLocaleString("en-IN")} ${s.part.unit} in stock)`] as [string, string]);
   const canWork = ctx.can("maintenance", "edit") && (!ctx.isSupplier || (!!ctx.scope.partnerId && (wo.assignedPartnerId === ctx.scope.partnerId || wo.asset.custodianPartnerId === ctx.scope.partnerId)));
   const editable = open && canWork;
   const tasks = (wo.checklist ?? []) as unknown as TaskResult[];
@@ -282,6 +289,14 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
                 <Input name="quantity" inputMode="decimal" placeholder="Qty" aria-label="Quantity" required />
                 <Input name="unitCost" inputMode="decimal" placeholder={`Unit cost ${org.currency}`} aria-label="Unit cost" />
                 <SubmitButton size="sm" variant="secondary">Add part</SubmitButton>
+              </form>
+            )}
+            {editable && stockParts.length > 0 && (
+              <form action={issueStockAction} className="mt-3 grid gap-2 sm:grid-cols-5">
+                <input type="hidden" name="id" value={wo.id} />
+                <Select name="partId" options={stockParts} aria-label="Part from stock" className="sm:col-span-3" />
+                <Input name="quantity" inputMode="decimal" placeholder="Qty" aria-label="Quantity from stock" required />
+                <SubmitButton size="sm" variant="secondary">Issue from stock</SubmitButton>
               </form>
             )}
             {cost.external > 0 && <p className="mt-4 text-sm">External cost: {money(cost.external)}</p>}

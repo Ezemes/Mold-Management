@@ -25,6 +25,7 @@ import {
 } from "@/lib/transfers";
 import { nextWorkOrderNumber } from "@/lib/work-orders";
 import { afterReadings } from "@/lib/maintenance";
+import { flagRequalification } from "@/lib/quality";
 import { str } from "@/lib/forms";
 
 function back(path: string, msg: string, kind: "error" | "ok" = "error"): never {
@@ -34,7 +35,7 @@ function back(path: string, msg: string, kind: "error" | "ok" = "error"): never 
 async function loadTransfer(ctx: Ctx, id: string) {
   const t = await db.transfer.findFirst({
     where: { AND: [transferScope(ctx), { id }] },
-    include: { fromSite: true, toSite: true, items: { include: { asset: { include: { meters: true } }, handovers: true, disputes: true } } },
+    include: { fromSite: true, toSite: true, items: { include: { asset: { include: { meters: true, assetType: true } }, handovers: true, disputes: true } } },
   });
   if (!t) back("/transfers", "Transfer not found or not in your scope.");
   return t;
@@ -289,6 +290,9 @@ export async function receiveTransferAction(fd: FormData) {
         // Decision D3: custody passes to the receiver when receipt is confirmed.
         await tx.asset.update({ where: { id: it.assetId }, data: { siteId: t.toSiteId, custodianPartnerId: t.toPartnerId, locationDetail: t.toLocationDetail, status: "active" } });
         await tx.transferItem.update({ where: { id: it.id }, data: { status: findings.length ? "disputed" : "accepted" } });
+        if (ctx.org.requalifyOnTransfer && it.asset.assetType.kind === "mold" && t.toSiteId !== t.fromSiteId) {
+          await flagRequalification(tx, { orgId: ctx.org.id, userId: ctx.user.id }, it.asset, `Moved to ${t.toSite.name} by ${t.number}`);
+        }
         await audit(ctx, { action: "custody_transferred", entityType: "asset", entityId: it.assetId, entityLabel: `${it.asset.number} ${it.asset.name}`, before: { siteId: t.fromSiteId, custodianPartnerId: t.fromPartnerId }, after: { siteId: t.toSiteId, custodianPartnerId: t.toPartnerId, transfer: t.number, shots, disputes: findings.map((f) => f.kind) } }, tx);
       }
       await tx.transfer.update({ where: { id: t.id }, data: { status: disputes ? "disputed" : "completed", receivedAt, receivedById: ctx.user.id, ...(disputes ? {} : { completedAt: new Date() }) } });

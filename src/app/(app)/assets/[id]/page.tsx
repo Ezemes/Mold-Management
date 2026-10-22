@@ -10,6 +10,7 @@ import { DELETION_REASON_HINT } from "@/lib/copy";
 import { Badge, btnClass, Card, cx, EmptyState, Field, FlashFromParams, Input, Notice, PageHeader, Select, Stat, Table, Td } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
 import { LifeBar } from "@/components/life-bar";
+import { moldsForPress, pressesForMold } from "@/lib/compat";
 import { planState, woCost, WO_BADGE, WO_STATUS, WO_TYPES, workOrderScope } from "@/lib/maintenance";
 import {
   addProductAction,
@@ -33,6 +34,8 @@ const TABS = [
   ["counter", "Shot counter"],
   ["documents", "Documents"],
   ["maintenance", "Maintenance"],
+  ["presses", "Presses"],
+  ["quality", "Condition & qualification"],
   ["custody", "Custody & transfers"],
   ["history", "History"],
 ] as const;
@@ -47,7 +50,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
   const org = ctx.org;
   const tz = org.timezone;
   const kind = a.assetType.kind;
-  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "maintenance" ? ctx.can("maintenance") : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
+  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "maintenance" ? ctx.can("maintenance") : k === "presses" ? kind === "mold" || kind === "press" : k === "quality" ? ctx.can("quality") && kind !== "press" : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
   const tab = tabs.find(([k]) => k === sp.tab)?.[0] ?? "overview";
   const hid = <input type="hidden" name="id" value={a.id} />;
   const canEdit = ctx.can("assets", "edit");
@@ -65,6 +68,11 @@ export default async function PassportPage({ params, searchParams }: { params: P
     db.maintenancePlan.findMany({ where: { assetId: a.id }, include: { template: true }, orderBy: { createdAt: "asc" } }),
     db.workOrder.findMany({ where: { AND: [workOrderScope(ctx), { assetId: a.id }] }, include: { labor: true, parts: true }, orderBy: { createdAt: "desc" }, take: 100 }),
   ]) : [[], []];
+  const [evals, quals] = tab === "quality" ? await Promise.all([
+    db.conditionEvaluation.findMany({ where: { assetId: a.id }, orderBy: { evaluatedAt: "desc" }, take: 50 }),
+    db.qualification.findMany({ where: { assetId: a.id }, include: { press: true }, orderBy: { createdAt: "desc" } }),
+  ]) : [[], []];
+  const compat = tab === "presses" ? (kind === "press" ? await moldsForPress(ctx, a.id) : await pressesForMold(ctx, a.id)) : [];
   const [readings, history, moveSites, allSites] = await Promise.all([
     tab === "counter" && live.shots ? db.meterReading.findMany({ where: { meterId: live.shots.id }, orderBy: { readAt: "desc" }, take: 100, include: { enteredBy: true } }) : Promise.resolve([]),
     tab === "history" ? db.auditEvent.findMany({ where: { orgId: org.id, entityType: "asset", entityId: a.id }, orderBy: { createdAt: "desc" }, take: 100, include: { user: true } }) : Promise.resolve([]),
@@ -88,6 +96,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
         }
       />
       <FlashFromParams params={{ ok: sp.ok, error }} />
+      {a.requalificationReason && <Notice tone="warn">Re-qualification required: {a.requalificationReason}.{ctx.can("quality", "create") && !ctx.isSupplier && <> <Link href={`/quality/qualifications/new?asset=${encodeURIComponent(a.number)}`} className="underline">Start a qualification</Link>.</>}</Notice>}
       {live.readingOverdue && <Notice tone="warn">No shot reading for more than {org.readingOverdueDays} days. Record the current counter value.</Notice>}
 
       <nav className="mb-6 flex flex-wrap gap-1 border-b border-gray-200">
@@ -407,6 +416,67 @@ export default async function PassportPage({ params, searchParams }: { params: P
             </Table>
           </Card>
         </div>
+      )}
+
+      {tab === "quality" && (
+        <div className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Stat label="Condition score" value={a.conditionScore != null ? `${a.conditionScore.toFixed(2)} / 5` : "—"} hint={a.conditionDate ? `Approved evaluation of ${fmtDate(a.conditionDate, tz)}` : "Not evaluated yet"} />
+            <Stat label="Next evaluation" value={a.nextEvaluationDate ? fmtDate(a.nextEvaluationDate, tz) : "—"} hint={a.nextEvaluationDate && a.nextEvaluationDate < new Date() ? "Overdue" : undefined} />
+            <Stat label="Qualification" value={a.requalificationReason ? "Required" : quals.some((q) => q.status === "passed") ? "Qualified" : "—"} hint={a.requalificationReason || undefined} />
+          </div>
+          <Card title="Evaluations" actions={ctx.can("quality", "create") && <Link href={`/quality/evaluations/new?asset=${a.id}`} className={btnClass("secondary", "sm")}>Evaluate</Link>}>
+            {evals.filter((e) => e.status === "approved").length > 1 && (
+              <p className="mb-3 text-xs text-ink-500">Trend (oldest → newest): {evals.filter((e) => e.status === "approved").reverse().map((e) => e.score.toFixed(1)).join(" → ")}</p>
+            )}
+            <Table head={["Date", "Score", "Status"]} empty="No evaluations yet.">
+              {evals.map((e) => (
+                <tr key={e.id}>
+                  <Td><Link href={`/quality/evaluations/${e.id}`} className="hover:text-brand-700">{fmtDate(e.evaluatedAt, tz)}</Link></Td>
+                  <Td>{e.score.toFixed(2)}</Td>
+                  <Td><Badge status={e.status === "approved" ? "active" : e.status === "rejected" ? "suspended" : "pending"}>{e.status}</Badge></Td>
+                </tr>
+              ))}
+            </Table>
+          </Card>
+          {kind === "mold" && (
+            <Card title="Qualifications" actions={ctx.can("quality", "create") && !ctx.isSupplier && <Link href={`/quality/qualifications/new?asset=${encodeURIComponent(a.number)}`} className={btnClass("secondary", "sm")}>Start qualification</Link>}>
+              <Table head={["Qualification", "Press", "Kind", "Status"]} empty="No qualifications yet.">
+                {quals.map((q) => (
+                  <tr key={q.id}>
+                    <Td><Link href={`/quality/qualifications/${q.id}`} className="font-medium hover:text-brand-700">{q.number}</Link></Td>
+                    <Td className="text-xs">{q.press?.number ?? "—"}</Td>
+                    <Td className="text-xs">{q.kind === "requalification" ? "Re-qualification" : "Initial"}</Td>
+                    <Td><Badge status={q.status === "passed" ? "active" : q.status === "failed" ? "suspended" : q.status === "cancelled" ? "archived" : "pending"}>{q.status.replace("_", " ")}</Badge></Td>
+                  </tr>
+                ))}
+              </Table>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {tab === "presses" && (
+        <Card
+          title={kind === "press" ? "Molds this press can run" : "Presses that can run this mold"}
+          actions={<Link href={`/presses/finder?${kind === "press" ? "press" : "mold"}=${encodeURIComponent(a.number)}`} className={btnClass("secondary", "sm")}>Open finder</Link>}
+        >
+          {compat.filter((r) => r.status !== "incompatible").length === 0 ? (
+            <p className="text-sm text-ink-500">No compatible {kind === "press" ? "molds" : "presses"}. The finder shows the reasons.</p>
+          ) : (
+            <Table head={[kind === "press" ? "Mold" : "Press", "Site", "Status", "Not checked"]}>
+              {compat.filter((r) => r.status !== "incompatible").map((r) => (
+                <tr key={r.other.id}>
+                  <Td><Link href={`/assets/${r.other.id}?tab=presses`} className="font-medium hover:text-brand-700">{r.other.number}</Link><p className="text-xs text-ink-500">{r.other.name}</p></Td>
+                  <Td className="text-xs">{r.other.site.name}</Td>
+                  <Td>{r.status === "approved" ? <Badge color="green">Approved</Badge> : <Badge color="blue">Compatible (unqualified)</Badge>}</Td>
+                  <Td className="text-xs text-ink-500">{r.verdict.unknowns.map((u) => u.label).join(", ") || "—"}</Td>
+                </tr>
+              ))}
+            </Table>
+          )}
+          <p className="mt-3 text-xs text-ink-500">{compat.filter((r) => r.status === "incompatible").length} incompatible.</p>
+        </Card>
       )}
 
       {tab === "custody" && (

@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const actionCount = ctx.can("transfers") ? await db.notification.count({ where: { userId: ctx.user.id, orgId: ctx.org.id, readAt: null, kind: { startsWith: "transfer_" } } }) : 0;
 
   const nav: { title?: string; items: NavItem[] }[] = ctx.isSupplier
-    ? [{ items: [{ href: "/dashboard", label: "Home" }, { href: "/assets", label: "My molds" }, { href: "/transfers", label: "Transfers", badge: actionCount }, { href: "/maintenance", label: "Maintenance", badge: maintCount }, { href: "/scan", label: "Scan QR" }] }]
+    ? [{ items: [{ href: "/dashboard", label: "Home" }, { href: "/assets", label: "My molds" }, { href: "/transfers", label: "Transfers", badge: actionCount }, { href: "/maintenance", label: "Maintenance", badge: maintCount }, ...(ctx.can("quality") ? [{ href: "/quality", label: "Quality" }] : []), { href: "/scan", label: "Scan QR" }] }]
     : [
         { items: [{ href: "/dashboard", label: "Dashboard" }] },
         {
@@ -22,10 +22,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             { href: "/assets", label: "Assets" },
             ...(ctx.can("transfers") ? [{ href: "/transfers", label: "Transfers", badge: actionCount }] : []),
             ...(ctx.can("maintenance") ? [{ href: "/maintenance", label: "Maintenance", badge: maintCount }] : []),
+            { href: "/presses", label: "Presses" },
+            ...(ctx.can("quality") ? [{ href: "/quality", label: "Quality" }] : []),
+            ...(ctx.can("inventory") ? [{ href: "/inventory", label: "Spare parts" }] : []),
             { href: "/scan", label: "Scan QR" },
             ...(ctx.can("import_export") ? [{ href: "/import-export", label: "Import & export" }] : []),
           ],
         },
+        ...(ctx.can("planning") || ctx.can("reports")
+          ? [{
+              title: "Planning",
+              items: [
+                ...(ctx.can("planning") ? [{ href: "/planning/forecast", label: "Life forecast" }, { href: "/planning/capacity", label: "Capacity" }, { href: "/planning/budget", label: "Budget" }] : []),
+                ...(ctx.can("reports") ? [{ href: "/reports", label: "Reports" }] : []),
+              ],
+            }]
+          : []),
         {
           title: "Admin",
           items: [

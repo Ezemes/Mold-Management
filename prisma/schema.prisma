@@ -11,38 +11,53 @@ datasource db {
 
 /// The tenant: an OEM or molder that owns molds.
 model Organisation {
-  id           String   @id @default(cuid())
-  name         String
-  timezone     String   @default("Asia/Kolkata")
-  currency     String   @default("INR")
-  unitSystem   String   @default("metric") // metric | imperial
-  numberFormat String   @default("indian") // indian (lakh/crore) | international
+  id                    String   @id @default(cuid())
+  name                  String
+  timezone              String   @default("Asia/Kolkata")
+  currency              String   @default("INR")
+  unitSystem            String   @default("metric") // metric | imperial
+  numberFormat          String   @default("indian") // indian (lakh/crore) | international
   /// Days without a shot reading before an active mold is flagged overdue.
-  readingOverdueDays Int @default(30)
+  readingOverdueDays    Int      @default(30)
   /// always | cross_company | never — when transfer requests need approval
-  transferApproval   String @default("cross_company")
+  transferApproval      String   @default("cross_company")
   /// Shots allowed between the outbound and inbound handover readings before a dispute is raised
-  transferShotTolerance Int @default(50)
-  status       String   @default("active") // active | suspended
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  transferShotTolerance Int      @default(50)
+  /// Press compatibility rule settings (see src/lib/compat.pure.ts DEFAULT_RULES)
+  compatRules           Json     @default("{}")
+  /// Mark molds for re-qualification when custody moves to another site
+  requalifyOnTransfer   Boolean  @default(true)
+  /// Capacity planning defaults
+  capacityHoursPerMonth Int      @default(600)
+  defaultOeePct         Int      @default(75)
+  refurbDowntimeDays    Int      @default(14)
+  status                String   @default("active") // active | suspended
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  divisions   Division[]
-  sites       Site[]
-  partners    Partner[]
-  memberships Membership[]
-  roles       Role[]
-  invites     Invite[]
-  assetTypes  AssetType[]
-  assets      Asset[]
-  audit       AuditEvent[]
-  imports     ImportJob[]
-  transfers   Transfer[]
-  templates   MaintenanceTemplate[]
-  plans       MaintenancePlan[]
-  workOrders  WorkOrder[]
-  notifications Notification[]
-  attachments Attachment[]
+  divisions      Division[]
+  sites          Site[]
+  partners       Partner[]
+  memberships    Membership[]
+  roles          Role[]
+  invites        Invite[]
+  assetTypes     AssetType[]
+  assets         Asset[]
+  audit          AuditEvent[]
+  imports        ImportJob[]
+  transfers      Transfer[]
+  templates      MaintenanceTemplate[]
+  plans          MaintenancePlan[]
+  workOrders     WorkOrder[]
+  notifications  Notification[]
+  attachments    Attachment[]
+  moldPresses    MoldPress[]
+  evaluations    ConditionEvaluation[]
+  qualifications Qualification[]
+  parts          Part[]
+  stockMoves     StockMove[]
+  budgetItems    BudgetItem[]
+  demand         ProductDemand[]
 }
 
 model Division {
@@ -74,15 +89,15 @@ model Partner {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  sites            Site[]
-  memberships      Membership[]
-  invites          Invite[]
-  ownedAssets      Asset[]      @relation("AssetOwner")
-  custodyAssets    Asset[]      @relation("AssetCustodian")
-  toolmakerAssets  Asset[]      @relation("AssetToolmaker")
-  transfersFrom    Transfer[]   @relation("TransferFromPartner")
-  transfersTo      Transfer[]   @relation("TransferToPartner")
-  workOrders       WorkOrder[]
+  sites           Site[]
+  memberships     Membership[]
+  invites         Invite[]
+  ownedAssets     Asset[]      @relation("AssetOwner")
+  custodyAssets   Asset[]      @relation("AssetCustodian")
+  toolmakerAssets Asset[]      @relation("AssetToolmaker")
+  transfersFrom   Transfer[]   @relation("TransferFromPartner")
+  transfersTo     Transfer[]   @relation("TransferToPartner")
+  workOrders      WorkOrder[]
 
   @@unique([orgId, name])
 }
@@ -114,6 +129,7 @@ model Site {
   assets        Asset[]
   transfersFrom Transfer[] @relation("TransferFromSite")
   transfersTo   Transfer[] @relation("TransferToSite")
+  stock         Stock[]
 
   @@unique([orgId, name])
 }
@@ -142,7 +158,7 @@ model User {
   readings       MeterReading[]
   docVersions    DocumentVersion[]
   notifications  Notification[]
-  assignedWork   WorkOrder[]      @relation("WorkOrderAssignee")
+  assignedWork   WorkOrder[]       @relation("WorkOrderAssignee")
   labor          WorkOrderLabor[]
 }
 
@@ -238,20 +254,26 @@ model AuditEvent {
 // ─── Assets ─────────────────────────────────────────────────────────────────
 
 model AssetType {
-  id           String       @id @default(cuid())
-  orgId        String
-  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  key          String
-  name         String
+  id               String       @id @default(cuid())
+  orgId            String
+  org              Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  key              String
+  name             String
   /// mold | press | equipment. Drives which standard fields and tabs are shown.
-  kind         String       @default("equipment")
-  description  String       @default("")
-  numberPrefix String       @default("")
+  kind             String       @default("equipment")
+  description      String       @default("")
+  numberPrefix     String       @default("")
   /// { components, cavities, products, meters, documents } booleans
-  features     Json         @default("{}")
-  archived     Boolean      @default(false)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  features         Json         @default("{}")
+  /// Condition evaluation criteria: [{ key, label, weight }]; scores below the threshold raise a work order
+  evalCriteria     Json         @default("[]")
+  evalThreshold    Float        @default(3)
+  evalIntervalDays Int          @default(180)
+  /// Budget generation rules: { pmCostPerService, partsPerCavity, refurbCost, replacementCost }
+  budgetRules      Json         @default("{}")
+  archived         Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   fields FieldDef[]
   assets Asset[]
@@ -309,48 +331,76 @@ model Asset {
   componentRole String  @default("") // insert | core | cavity block | slide | lifter | hot runner | other
 
   // Mold design (standard fields; shown for kind = mold)
-  toolNumber        String  @default("")
-  designCavities    Int?
-  designCycleTimeS  Float?
-  shotWeightG       Float?
-  material          String  @default("")
-  lengthMm          Float?
-  widthMm           Float?
-  heightMm          Float?
-  weightKg          Float?
-  clampTonnageT     Float?
-  hotRunnerZones    Int?
-  coolingCircuits   Int?
+  toolNumber       String @default("")
+  designCavities   Int?
+  designCycleTimeS Float?
+  shotWeightG      Float?
+  material         String @default("")
+  lengthMm         Float?
+  widthMm          Float?
+  heightMm         Float?
+  weightKg         Float?
+  clampTonnageT    Float?
+  hotRunnerZones   Int?
+  coolingCircuits  Int?
+  /// Mold: shut height, opening needed to eject, locating ring, sprue bush radius
+  stackHeightMm    Float?
+  openingStrokeMm  Float?
+  locatingRingMm   Float?
+  sprueRadiusMm    Float?
+  /// Press capabilities (spec §4.2)
+  tieBarHMm        Float?
+  tieBarVMm        Float?
+  platenWMm        Float?
+  platenHMm        Float?
+  minMoldHeightMm  Float?
+  maxMoldHeightMm  Float?
+  maxOpeningMm     Float?
+  shotCapacityG    Float?
+  nozzleRadiusMm   Float?
+  maxMoldWeightKg  Float?
 
   // Life
-  toolmakerPartnerId String?
-  toolmakerPartner   Partner?  @relation("AssetToolmaker", fields: [toolmakerPartnerId], references: [id], onDelete: SetNull)
-  buildDate          DateTime?
-  warrantyShots      Int?
+  toolmakerPartnerId  String?
+  toolmakerPartner    Partner?  @relation("AssetToolmaker", fields: [toolmakerPartnerId], references: [id], onDelete: SetNull)
+  buildDate           DateTime?
+  warrantyShots       Int?
   shotsBetweenRefurbs Int?
-  refurbsAllowed     Int?
-  refurbsDone        Int       @default(0)
+  refurbsAllowed      Int?
+  refurbsDone         Int       @default(0)
   /// Lifetime shots and date at the last completed refurbishment work order
-  lastRefurbShots    Int?
-  lastRefurbDate     DateTime?
-  endOfLifeShots     Int?
-  capitalisationDate DateTime?
-  capitalValue       Decimal?  @db.Decimal(14, 2)
-  costCentre         String    @default("")
+  lastRefurbShots     Int?
+  lastRefurbDate      DateTime?
+  endOfLifeShots      Int?
+  capitalisationDate  DateTime?
+  capitalValue        Decimal?  @db.Decimal(14, 2)
+  costCentre          String    @default("")
 
-  customValues Json      @default("{}")
-  notes        String    @default("")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  customValues          Json      @default("{}")
+  notes                 String    @default("")
+  /// Condition (latest approved evaluation) and qualification state
+  conditionScore        Float?
+  conditionDate         DateTime?
+  nextEvaluationDate    DateTime?
+  requalificationReason String    @default("")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
 
-  cavities  Cavity[]
-  products  AssetProduct[]
-  meters        Meter[]
-  documents     Document[]
-  transferItems TransferItem[]
-  plans         MaintenancePlan[]
-  workOrders    WorkOrder[]
+  cavities       Cavity[]
+  products       AssetProduct[]
+  meters         Meter[]
+  documents      Document[]
+  transferItems  TransferItem[]
+  plans          MaintenancePlan[]
+  workOrders     WorkOrder[]
+  pressesFor     MoldPress[]           @relation("MoldPressMold")
+  moldsFor       MoldPress[]           @relation("MoldPressPress")
+  evaluations    ConditionEvaluation[]
+  qualifications Qualification[]       @relation("QualMold")
+  qualifiedOn    Qualification[]       @relation("QualPress")
+  partLinks      PartAsset[]
+  budgetItems    BudgetItem[]
 
   @@unique([orgId, number])
   @@index([orgId, siteId])
@@ -472,42 +522,42 @@ model ImportJob {
 
 /// draft → requested → approved → in_transit → completed, or rejected / cancelled; disputed if a handover does not reconcile.
 model Transfer {
-  id              String       @id @default(cuid())
-  orgId           String
-  org             Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  number          String
-  status          String       @default("draft")
-  reason          String       @default("production_move")
-  fromSiteId      String
-  fromSite        Site         @relation("TransferFromSite", fields: [fromSiteId], references: [id], onDelete: Restrict)
-  fromPartnerId   String?
-  fromPartner     Partner?     @relation("TransferFromPartner", fields: [fromPartnerId], references: [id], onDelete: Restrict)
-  toSiteId        String
-  toSite          Site         @relation("TransferToSite", fields: [toSiteId], references: [id], onDelete: Restrict)
-  toPartnerId     String?
-  toPartner       Partner?     @relation("TransferToPartner", fields: [toPartnerId], references: [id], onDelete: Restrict)
-  toLocationDetail String      @default("")
-  neededBy        DateTime?
-  notes           String       @default("")
-  requestedById   String?
-  requestedAt     DateTime?
-  approvedById    String?
-  approvedAt      DateTime?
-  rejectionReason String       @default("")
-  carrier         String       @default("")
-  trackingNumber  String       @default("")
-  vehicleNumber   String       @default("")
-  ewayBillNumber  String       @default("")
-  eta             DateTime?
-  shippedAt       DateTime?
-  shippedById     String?
-  receivedAt      DateTime?
-  receivedById    String?
-  completedAt     DateTime?
-  cancelledReason String       @default("")
-  createdById     String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id               String       @id @default(cuid())
+  orgId            String
+  org              Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  number           String
+  status           String       @default("draft")
+  reason           String       @default("production_move")
+  fromSiteId       String
+  fromSite         Site         @relation("TransferFromSite", fields: [fromSiteId], references: [id], onDelete: Restrict)
+  fromPartnerId    String?
+  fromPartner      Partner?     @relation("TransferFromPartner", fields: [fromPartnerId], references: [id], onDelete: Restrict)
+  toSiteId         String
+  toSite           Site         @relation("TransferToSite", fields: [toSiteId], references: [id], onDelete: Restrict)
+  toPartnerId      String?
+  toPartner        Partner?     @relation("TransferToPartner", fields: [toPartnerId], references: [id], onDelete: Restrict)
+  toLocationDetail String       @default("")
+  neededBy         DateTime?
+  notes            String       @default("")
+  requestedById    String?
+  requestedAt      DateTime?
+  approvedById     String?
+  approvedAt       DateTime?
+  rejectionReason  String       @default("")
+  carrier          String       @default("")
+  trackingNumber   String       @default("")
+  vehicleNumber    String       @default("")
+  ewayBillNumber   String       @default("")
+  eta              DateTime?
+  shippedAt        DateTime?
+  shippedById      String?
+  receivedAt       DateTime?
+  receivedById     String?
+  completedAt      DateTime?
+  cancelledReason  String       @default("")
+  createdById      String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   items TransferItem[]
 
@@ -552,19 +602,19 @@ model Handover {
 }
 
 model Dispute {
-  id             String       @id @default(cuid())
-  itemId         String
-  item           TransferItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  kind           String // shot_mismatch | condition | missing_accessories | other
-  detail         String
-  outboundShots  Int?
-  inboundShots   Int?
-  status         String       @default("open") // open | resolved
-  resolution     String       @default("")
-  resolvedById   String?
-  resolvedAt     DateTime?
-  workOrderId    String?
-  createdAt      DateTime     @default(now())
+  id            String       @id @default(cuid())
+  itemId        String
+  item          TransferItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  kind          String // shot_mismatch | condition | missing_accessories | other
+  detail        String
+  outboundShots Int?
+  inboundShots  Int?
+  status        String       @default("open") // open | resolved
+  resolution    String       @default("")
+  resolvedById  String?
+  resolvedAt    DateTime?
+  workOrderId   String?
+  createdAt     DateTime     @default(now())
 }
 
 // ─── Maintenance (spec §4.4) ────────────────────────────────────────────────
@@ -615,52 +665,52 @@ model MaintenancePlan {
 }
 
 model WorkOrder {
-  id               String               @id @default(cuid())
-  orgId            String
-  org              Organisation         @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  number           String
-  assetId          String
-  asset            Asset                @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  id                String               @id @default(cuid())
+  orgId             String
+  org               Organisation         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  number            String
+  assetId           String
+  asset             Asset                @relation(fields: [assetId], references: [id], onDelete: Restrict)
   /// preventive | corrective | refurbishment | inspection | modification
-  type             String
-  title            String
-  description      String               @default("")
+  type              String
+  title             String
+  description       String               @default("")
   /// open | in_progress | on_hold | completed | cancelled
-  status           String               @default("open")
-  priority         String               @default("medium") // low | medium | high | urgent
-  assignedUserId   String?
-  assignedUser     User?                @relation("WorkOrderAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  status            String               @default("open")
+  priority          String               @default("medium") // low | medium | high | urgent
+  assignedUserId    String?
+  assignedUser      User?                @relation("WorkOrderAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
   /// Work done by a partner (e.g. the molder holding the mold)
   assignedPartnerId String?
-  assignedPartner  Partner?             @relation(fields: [assignedPartnerId], references: [id], onDelete: SetNull)
-  planId           String?
-  plan             MaintenancePlan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
-  templateId       String?
-  template         MaintenanceTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  assignedPartner   Partner?             @relation(fields: [assignedPartnerId], references: [id], onDelete: SetNull)
+  planId            String?
+  plan              MaintenancePlan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+  templateId        String?
+  template          MaintenanceTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   /// manual | trigger | checklist_failure | dispute | quarantine
-  source           String               @default("manual")
-  sourceId         String               @default("")
-  scheduledDate    DateTime?
-  dueDate          DateTime?
+  source            String               @default("manual")
+  sourceId          String               @default("")
+  scheduledDate     DateTime?
+  dueDate           DateTime?
   /// For shot-triggered work: the counter value at which it falls due
-  dueAtShots       Int?
-  startedAt        DateTime?
-  completedAt      DateTime?
-  completedById    String?
+  dueAtShots        Int?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  completedById     String?
   shotsAtCompletion Int?
   /// [{ id, text, type, unit, min, max, required, result: pass|fail|na|null, value, note }]
-  checklist        Json                 @default("[]")
-  passPct          Float?
-  rootCause        String               @default("")
-  resolution       String               @default("")
-  externalCost     Decimal              @default(0) @db.Decimal(14, 2)
-  clearsQuarantine Boolean              @default(false)
-  signedByName     String               @default("")
-  signedAt         DateTime?
-  cancelReason     String               @default("")
-  createdById      String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  checklist         Json                 @default("[]")
+  passPct           Float?
+  rootCause         String               @default("")
+  resolution        String               @default("")
+  externalCost      Decimal              @default(0) @db.Decimal(14, 2)
+  clearsQuarantine  Boolean              @default(false)
+  signedByName      String               @default("")
+  signedAt          DateTime?
+  cancelReason      String               @default("")
+  createdById       String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
   labor WorkOrderLabor[]
   parts WorkOrderPart[]
@@ -691,6 +741,10 @@ model WorkOrderPart {
   description String
   quantity    Float
   unitCost    Decimal   @default(0) @db.Decimal(14, 2)
+  /// Set when issued from stock (a StockMove of kind "issue" records the deduction)
+  partId      String?
+  part        Part?     @relation(fields: [partId], references: [id], onDelete: SetNull)
+  siteId      String?
   createdAt   DateTime  @default(now())
 }
 
@@ -732,4 +786,206 @@ model Notification {
 
   @@unique([userId, dedupeKey])
   @@index([userId, readAt])
+}
+
+// ─── Phase 3c: engineering & planning ───────────────────────────────────────
+
+/// A mold–press pair. "approved" comes from a passed PQ; revoked pairs keep their history.
+model MoldPress {
+  id              String       @id @default(cuid())
+  orgId           String
+  org             Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  moldId          String
+  mold            Asset        @relation("MoldPressMold", fields: [moldId], references: [id], onDelete: Cascade)
+  pressId         String
+  press           Asset        @relation("MoldPressPress", fields: [pressId], references: [id], onDelete: Cascade)
+  /// approved | revoked
+  status          String       @default("approved")
+  qualificationId String?
+  approvedById    String?
+  approvedAt      DateTime     @default(now())
+  revokedReason   String       @default("")
+  /// Process settings proven at PQ (cycle time achieved etc.)
+  notes           String       @default("")
+
+  @@unique([moldId, pressId])
+}
+
+model ConditionEvaluation {
+  id            String       @id @default(cuid())
+  orgId         String
+  org           Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assetId       String
+  asset         Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  /// submitted | approved | rejected
+  status        String       @default("submitted")
+  /// [{ key, label, weight, score (1–5), note }]
+  scores        Json
+  score         Float
+  notes         String       @default("")
+  shots         Int?
+  evaluatedById String?
+  evaluatedAt   DateTime     @default(now())
+  decidedById   String?
+  decidedAt     DateTime?
+  rejectReason  String       @default("")
+  workOrderId   String?
+  createdAt     DateTime     @default(now())
+
+  @@index([assetId, evaluatedAt])
+}
+
+/// IQ → OQ → PQ for a mold, optionally on a specific press (PQ pass approves the pair).
+model Qualification {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  number      String
+  assetId     String
+  asset       Asset        @relation("QualMold", fields: [assetId], references: [id], onDelete: Cascade)
+  pressId     String?
+  press       Asset?       @relation("QualPress", fields: [pressId], references: [id], onDelete: SetNull)
+  siteId      String
+  /// initial | requalification
+  kind        String       @default("initial")
+  reason      String       @default("")
+  /// in_progress | passed | failed | cancelled
+  status      String       @default("in_progress")
+  createdById String?
+  createdAt   DateTime     @default(now())
+  closedAt    DateTime?
+
+  stages QualificationStage[]
+
+  @@unique([orgId, number])
+}
+
+model QualificationStage {
+  id              String        @id @default(cuid())
+  qualificationId String
+  qualification   Qualification @relation(fields: [qualificationId], references: [id], onDelete: Cascade)
+  /// IQ | OQ | PQ
+  stage           String
+  /// pending | in_progress | passed | failed
+  status          String        @default("pending")
+  ownerId         String?
+  plannedDate     DateTime?
+  actualDate      DateTime?
+  result          String        @default("")
+  workOrderId     String?
+  approvedById    String?
+  approvedAt      DateTime?
+
+  @@unique([qualificationId, stage])
+}
+
+model Part {
+  id            String       @id @default(cuid())
+  orgId         String
+  org           Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  number        String
+  name          String
+  manufacturer  String       @default("")
+  mfrPartNumber String       @default("")
+  category      String       @default("")
+  unit          String       @default("pcs")
+  unitCost      Decimal      @default(0) @db.Decimal(14, 2)
+  /// Defaults for new stock locations
+  minQty        Float        @default(0)
+  maxQty        Float        @default(0)
+  reorderPoint  Float        @default(0)
+  shelfLifeDays Int?
+  active        Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  stock   Stock[]
+  moves   StockMove[]
+  assets  PartAsset[]
+  woParts WorkOrderPart[]
+
+  @@unique([orgId, number])
+}
+
+model PartAsset {
+  partId  String
+  part    Part   @relation(fields: [partId], references: [id], onDelete: Cascade)
+  assetId String
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@id([partId, assetId])
+}
+
+/// Stock of one part at one site.
+model Stock {
+  id           String   @id @default(cuid())
+  partId       String
+  part         Part     @relation(fields: [partId], references: [id], onDelete: Cascade)
+  siteId       String
+  site         Site     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  bin          String   @default("")
+  quantity     Float    @default(0)
+  minQty       Float    @default(0)
+  maxQty       Float    @default(0)
+  reorderPoint Float    @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([partId, siteId])
+}
+
+/// Stock ledger: every change to a stock quantity.
+model StockMove {
+  id           String       @id @default(cuid())
+  orgId        String
+  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  partId       String
+  part         Part         @relation(fields: [partId], references: [id], onDelete: Restrict)
+  siteId       String
+  /// receipt | issue | transfer_out | transfer_in | adjustment
+  kind         String
+  /// Signed: + into stock, − out of stock
+  quantity     Float
+  balanceAfter Float
+  unitCost     Decimal      @default(0) @db.Decimal(14, 2)
+  workOrderId  String?
+  reference    String       @default("")
+  note         String       @default("")
+  expiresAt    DateTime?
+  userId       String?
+  createdAt    DateTime     @default(now())
+
+  @@index([partId, createdAt])
+}
+
+model BudgetItem {
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assetId   String
+  asset     Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  year      Int
+  /// pm | parts | refurbishment | replacement | other
+  category  String
+  amount    Decimal      @db.Decimal(14, 2)
+  /// rule | manual
+  source    String       @default("rule")
+  note      String       @default("")
+  updatedAt DateTime     @updatedAt
+
+  @@unique([assetId, year, category])
+  @@index([orgId, year])
+}
+
+/// Monthly demand per product (part number) for capacity planning.
+model ProductDemand {
+  id         String       @id @default(cuid())
+  orgId      String
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  partNumber String
+  /// First day of the month (UTC)
+  month      DateTime
+  quantity   Int
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([orgId, partNumber, month])
 }

@@ -6,12 +6,12 @@ import { evaluatePlans, OPEN_WO } from "./maintenance";
 const DAY = 86_400_000;
 
 /**
- * The daily job (spec §4.4/§4.6): calendar and shot triggers, overdue readings, overdue work orders
- * and late transfers. Every alert is deduped, so running it twice in a day is harmless.
+ * The daily job (spec §4.4–4.6): calendar and shot triggers, overdue readings, overdue work orders,
+ * late transfers and condition evaluations due. Every alert is deduped, so running it twice in a day is harmless.
  */
 export async function runDaily(now = new Date()) {
   const orgs = await db.organisation.findMany({ select: { id: true, readingOverdueDays: true } });
-  const out = { orgs: orgs.length, raised: 0, warned: 0, readingAlerts: 0, woAlerts: 0, transferAlerts: 0 };
+  const out = { orgs: orgs.length, raised: 0, warned: 0, readingAlerts: 0, woAlerts: 0, transferAlerts: 0, evaluationAlerts: 0 };
   const week = Math.floor(now.getTime() / (7 * DAY));
   for (const org of orgs) {
     const r = await evaluatePlans(org.id, undefined, now);
@@ -42,6 +42,13 @@ export async function runDaily(now = new Date()) {
     for (const t of lateT) {
       const users = await recipientsFor(org.id, "transfers", "edit", { siteId: t.toSiteId, partnerIds: [t.toPartnerId] });
       out.transferAlerts += await notify(org.id, users, { kind: "transfer_late", title: `Transfer ${t.number} is past its ETA`, body: "Confirm receipt if it has arrived, or follow up with the carrier.", link: `/transfers/${t.id}`, dedupeKey: `transfer-late:${t.id}` });
+    }
+
+    // Condition evaluations falling due — once per asset per due date.
+    const evalDue = await db.asset.findMany({ where: { orgId: org.id, deletedAt: null, status: { notIn: ["retired", "scrapped"] }, nextEvaluationDate: { lte: now } }, select: { id: true, number: true, name: true, siteId: true, custodianPartnerId: true, nextEvaluationDate: true } });
+    for (const a of evalDue) {
+      const users = await recipientsFor(org.id, "quality", "create", { siteId: a.siteId, partnerIds: [a.custodianPartnerId] });
+      out.evaluationAlerts += await notify(org.id, users, { kind: "evaluation_due", title: `Condition evaluation due: ${a.number}`, body: `${a.name} was due for evaluation on ${a.nextEvaluationDate!.toISOString().slice(0, 10)}.`, link: `/quality/evaluations/new?asset=${a.id}`, dedupeKey: `eval-due:${a.id}:${a.nextEvaluationDate!.toISOString().slice(0, 10)}` });
     }
   }
   await emailPending();
