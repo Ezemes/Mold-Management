@@ -1,6 +1,6 @@
 # Phase 2 — Product Specification (draft for approval)
 
-Status: **v0.2 — decisions D1–D8 recorded 2026-10-22; awaiting final approval to start Phase 3a.**
+Status: **v1.0 — approved 2026-10-22. Phase 3a (Foundation) built; see README.**
 Inputs: `research/REA_FINDINGS_COAST.md` (public front-end analysis of the reference) and the original brief: "Unified EAM platform with specialized global mold management".
 
 Product name: **Plant Metrics Mold Management** (short form in this spec: **PMMM**). (D1)
