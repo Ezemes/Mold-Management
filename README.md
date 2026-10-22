@@ -7,3 +7,5 @@ Current phase: **Phase 1 — reference analysis.** The public front-end pass is 
 (`research/REA_FINDINGS_COAST.md`); authenticated behaviour is out of scope
 because COAST is a third party. See `research/` for environment status, scope and coverage gaps.
 No application code exists yet; implementation starts only after Phase 2 approval.
+
+Phase 2 product specification (draft, awaiting approval): `docs/PHASE2_PRODUCT_SPEC.md`.
