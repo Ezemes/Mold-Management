@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireOrg } from "@/lib/auth";
 import { OrgSwitcher, Shell, UserMenu, type NavItem } from "@/components/shell";
@@ -7,15 +8,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const ctx = await requireOrg();
   const memberships = await db.membership.findMany({ where: { userId: ctx.user.id, status: "active" }, include: { org: true } });
   const orgs = memberships.map((m) => ({ id: m.org.id, name: m.org.name }));
+  const unread = await db.notification.count({ where: { userId: ctx.user.id, orgId: ctx.org.id, readAt: null } });
+  const actionCount = ctx.can("transfers") ? await db.notification.count({ where: { userId: ctx.user.id, orgId: ctx.org.id, readAt: null, kind: { startsWith: "transfer_" } } }) : 0;
 
   const nav: { title?: string; items: NavItem[] }[] = ctx.isSupplier
-    ? [{ items: [{ href: "/dashboard", label: "Home" }, { href: "/assets", label: "My molds" }, { href: "/scan", label: "Scan QR" }] }]
+    ? [{ items: [{ href: "/dashboard", label: "Home" }, { href: "/assets", label: "My molds" }, { href: "/transfers", label: "Transfers", badge: actionCount }, { href: "/maintenance", label: "Maintenance" }, { href: "/scan", label: "Scan QR" }] }]
     : [
         { items: [{ href: "/dashboard", label: "Dashboard" }] },
         {
           title: "Fleet",
           items: [
             { href: "/assets", label: "Assets" },
+            ...(ctx.can("transfers") ? [{ href: "/transfers", label: "Transfers", badge: actionCount }] : []),
+            ...(ctx.can("maintenance") ? [{ href: "/maintenance", label: "Maintenance" }] : []),
             { href: "/scan", label: "Scan QR" },
             ...(ctx.can("import_export") ? [{ href: "/import-export", label: "Import & export" }] : []),
           ],
@@ -51,6 +56,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <form action="/assets" className="hidden sm:block">
             <input name="q" placeholder="Search assets…" className="w-56 rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white" />
           </form>
+          <Link href="/notifications" className="relative rounded-md px-2 py-1 text-sm text-ink-700 hover:bg-gray-100" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}>
+            Alerts{unread > 0 && <span className="ml-1 rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">{unread}</span>}
+          </Link>
           <UserMenu name={`${ctx.user.firstName} ${ctx.user.lastName}`.trim()} email={ctx.user.email} links={[{ href: "/profile", label: "Profile" }]} />
         </>
       }

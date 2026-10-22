@@ -5,7 +5,7 @@ import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { db } from "./db";
-import { can, normalizePermissions, type Action, type Module, type Permissions } from "./permissions";
+import { can, rolePermissions, type Action, type Module, type Permissions } from "./permissions";
 
 const COOKIE = "pm_session";
 const MAX_AGE = 60 * 60 * 12;
@@ -73,7 +73,7 @@ async function loadCtx(userId: string, orgId: string) {
     include: { role: true, org: true, partner: true, user: true },
   });
   if (!m || m.status !== "active" || m.org.status !== "active") return null;
-  const perms: Permissions = normalizePermissions(m.role.permissions);
+  const perms: Permissions = rolePermissions(m.role);
   const scope: Scope = m.role.isSupplier || m.scopeType === "partner"
     ? { type: "partner", ids: [], partnerId: m.partnerId }
     : { type: (["all", "sites", "divisions"].includes(m.scopeType) ? m.scopeType : "all") as Scope["type"], ids: m.scopeIds, partnerId: null };

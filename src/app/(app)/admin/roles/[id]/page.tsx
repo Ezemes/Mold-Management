@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireOrg } from "@/lib/auth";
-import { normalizePermissions } from "@/lib/permissions";
+import { rolePermissions } from "@/lib/permissions";
 import { Field, FlashFromParams, Input, Notice, PageHeader, Select } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
 import { deleteRoleAction, saveRoleAction } from "../../actions";
@@ -26,7 +26,7 @@ export default async function RolePage({ params, searchParams }: { params: Promi
           <Field label="Description" className="sm:col-span-2"><Input name="description" defaultValue={r.description} disabled={locked} /></Field>
           <Field label="Kind"><Select name="isSupplier" defaultValue={r.isSupplier ? "1" : "0"} options={{ "0": "Internal", "1": "Supplier" }} disabled={locked} /></Field>
         </div>
-        <RoleMatrix perms={normalizePermissions(r.permissions)} disabled={locked} />
+        <RoleMatrix perms={rolePermissions(r)} disabled={locked} />
         {!locked && <SubmitButton>Save role</SubmitButton>}
       </form>
       {!r.key && ctx.can("roles", "delete") && (

@@ -31,6 +31,7 @@ const TABS = [
   ["components", "Components & cavities"],
   ["counter", "Shot counter"],
   ["documents", "Documents"],
+  ["custody", "Custody & transfers"],
   ["history", "History"],
 ] as const;
 
@@ -44,7 +45,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
   const org = ctx.org;
   const tz = org.timezone;
   const kind = a.assetType.kind;
-  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
+  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
   const tab = tabs.find(([k]) => k === sp.tab)?.[0] ?? "overview";
   const hid = <input type="hidden" name="id" value={a.id} />;
   const canEdit = ctx.can("assets", "edit");
@@ -52,6 +53,12 @@ export default async function PassportPage({ params, searchParams }: { params: P
   const confirmHint = sp.error?.endsWith("[confirm]");
   const error = sp.error?.replace(/ \[confirm\]$/, "");
 
+  const custody = tab === "custody" ? await db.transferItem.findMany({
+    where: { assetId: a.id, transfer: { status: { notIn: ["draft"] } } },
+    include: { transfer: { include: { fromSite: true, toSite: true, fromPartner: true, toPartner: true } }, handovers: true, disputes: true },
+    orderBy: { createdAt: "desc" },
+  }) : [];
+  const corrections = tab === "custody" ? await db.auditEvent.findMany({ where: { orgId: org.id, entityType: "asset", entityId: a.id, action: { in: ["custody_corrected", "created"] } }, orderBy: { createdAt: "desc" }, include: { user: true } }) : [];
   const [readings, history, moveSites, allSites] = await Promise.all([
     tab === "counter" && live.shots ? db.meterReading.findMany({ where: { meterId: live.shots.id }, orderBy: { readAt: "desc" }, take: 100, include: { enteredBy: true } }) : Promise.resolve([]),
     tab === "history" ? db.auditEvent.findMany({ where: { orgId: org.id, entityType: "asset", entityId: a.id }, orderBy: { createdAt: "desc" }, take: 100, include: { user: true } }) : Promise.resolve([]),
@@ -68,6 +75,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
         actions={
           <>
             {live.features.meters && ctx.can("readings", "create") && <Link href={`/assets/${a.id}?tab=counter`} className={btnClass("primary")}>Record shots</Link>}
+            {ctx.can("transfers", "create") && a.status === "active" && <Link href={`/transfers/new?asset=${a.id}`} className={btnClass("secondary")}>Transfer</Link>}
             <Link href={`/assets/${a.id}/tag`} className={btnClass("secondary")}>QR tag</Link>
             {canEdit && <Link href={`/assets/${a.id}/edit`} className={btnClass("secondary")}>Edit</Link>}
           </>
@@ -112,7 +120,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
                     <Field label="Note" className="sm:col-span-2"><Input name="reason" /></Field>
                     <div><SubmitButton size="sm">Move</SubmitButton></div>
                   </form>
-                  <p className="mt-2 text-xs text-ink-500">Moving to another company is a transfer (coming in Phase 3b).</p>
+                  <p className="mt-2 text-xs text-ink-500">Moving to another company needs a <Link href={`/transfers/new?asset=${a.id}`} className="text-brand-700 hover:underline">transfer</Link> with handovers at both ends.</p>
                 </details>
               )}
               {ctx.can("assets", "delete") && (
@@ -348,6 +356,42 @@ export default async function PassportPage({ params, searchParams }: { params: P
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === "custody" && (
+        <div className="space-y-4">
+          <Card title="Chain of custody">
+            <ol className="relative space-y-4 border-l border-gray-200 pl-5">
+              <li>
+                <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full bg-brand-600" />
+                <p className="text-sm font-medium">Now: {custodian} · {a.site.name}{a.locationDetail && ` · ${a.locationDetail}`}</p>
+              </li>
+              {custody.map((it) => {
+                const tr = it.transfer;
+                const out = it.handovers.find((h) => h.direction === "outbound");
+                const inb = it.handovers.find((h) => h.direction === "inbound");
+                return (
+                  <li key={it.id}>
+                    <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full bg-gray-300" />
+                    <p className="text-sm"><Link href={`/transfers/${tr.id}`} className="font-medium text-brand-700 hover:underline">{tr.number}</Link> · {tr.fromPartner?.name ?? org.name} ({tr.fromSite.name}) → {tr.toPartner?.name ?? org.name} ({tr.toSite.name}) <Badge status={it.status === "disputed" ? "quarantined" : tr.status === "completed" ? "active" : "pending"}>{it.status === "disputed" ? "disputed" : tr.status.replace("_", " ")}</Badge></p>
+                    <p className="text-xs text-ink-500">
+                      {out ? `Dispatched ${fmtDateTime(out.at, tz)}${out.shotReading != null ? ` at ${fmtNum(out.shotReading, org)} shots` : ""}` : "Not yet dispatched"}
+                      {inb && ` · received ${fmtDateTime(inb.at, tz)}${inb.shotReading != null ? ` at ${fmtNum(inb.shotReading, org)} shots` : ""}`}
+                      {it.disputes.length > 0 && ` · ${it.disputes.length} dispute(s)`}
+                    </p>
+                  </li>
+                );
+              })}
+              {corrections.map((c) => (
+                <li key={c.id}>
+                  <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full bg-amber-400" />
+                  <p className="text-sm">{c.action === "created" ? "Registered" : "Custody corrected by admin"} · {fmtDateTime(c.createdAt, tz)} · {c.user?.email ?? "system"}</p>
+                  {c.reason && <p className="text-xs text-ink-500">{c.reason}</p>}
+                </li>
+              ))}
+            </ol>
+          </Card>
         </div>
       )}
 

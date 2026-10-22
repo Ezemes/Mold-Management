@@ -9,6 +9,7 @@ import { ASSET_STATUS, COMPONENT_ROLES, DOC_CATEGORIES, features } from "@/lib/a
 import { readFieldValues } from "@/lib/asset-values";
 import { ALLOWED_MIME, MAX_UPLOAD_BYTES, putFile } from "@/lib/storage";
 import { recordReading, ReadingError } from "@/lib/meters";
+import { openTransferFor } from "@/lib/transfers";
 import { str, token } from "@/lib/forms";
 import { nextNumber } from "@/lib/asset-number";
 import { localInputToDate } from "@/lib/format";
@@ -25,6 +26,12 @@ async function ownAsset(ctx: Ctx, id: string, path = "/assets") {
   const a = await findScopedAsset(ctx, id);
   if (!a) back(path, "Asset not found or not in your scope.");
   return a;
+}
+
+/** Location and custody are controlled by an open transfer until it completes. */
+async function assertNotInTransfer(assetId: string) {
+  const open = await openTransferFor([assetId]);
+  if (open) back(`/assets/${assetId}`, `This asset is in open transfer ${open.transfer.number}. Finish or cancel the transfer first.`);
 }
 
 const MANUAL_STATUSES = ["active", "in_maintenance", "refurbishing", "quarantined", "retired", "scrapped"];
@@ -111,6 +118,7 @@ export async function moveAssetAction(fd: FormData) {
   const ctx = await requireOrg();
   assertCan(ctx, "assets", "edit");
   const a = await ownAsset(ctx, str(fd, "id"));
+  await assertNotInTransfer(a.id);
   const path = `/assets/${a.id}`;
   const site = await scopedSite(ctx, str(fd, "siteId"));
   if (!site) back(path, "Choose a site you have access to.");
@@ -125,6 +133,7 @@ export async function correctCustodyAction(fd: FormData) {
   const ctx = await requireOrg();
   assertCan(ctx, "assets", "delete");
   const a = await ownAsset(ctx, str(fd, "id"));
+  await assertNotInTransfer(a.id);
   const path = `/assets/${a.id}`;
   const reason = str(fd, "reason");
   if (reason.length < 10) back(path, "Explain the correction (at least 10 characters). It is kept in the audit log.");
@@ -153,6 +162,7 @@ export async function deleteAssetAction(fd: FormData) {
   const ctx = await requireOrg();
   assertCan(ctx, "assets", "delete");
   const a = await ownAsset(ctx, str(fd, "id"));
+  await assertNotInTransfer(a.id);
   const reason = str(fd, "reason");
   if (!reason) back(`/assets/${a.id}`, "Give a reason for deleting.");
   await db.asset.update({ where: { id: a.id }, data: { deletedAt: new Date(), number: `${a.number}~deleted~${Date.now()}` } });

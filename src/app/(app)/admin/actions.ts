@@ -230,6 +230,8 @@ export async function saveRoleAction(fd: FormData) {
   }
   const isSupplier = str(fd, "isSupplier") === "1";
   if (isSupplier) for (const m of ["users", "roles", "settings", "audit", "asset_types", "sites", "partners", "import_export"]) delete perms[m];
+  // Approving transfers or work orders is an internal decision.
+  if (isSupplier) for (const m of Object.keys(perms)) perms[m] = perms[m].filter((a) => a !== "approve");
   const permissions = normalizePermissions(perms) as Prisma.InputJsonValue;
   if (id) {
     const before = await db.role.findFirstOrThrow({ where: { id, orgId: ctx.org.id } });
@@ -269,6 +271,8 @@ export async function saveSettingsAction(fd: FormData) {
     numberFormat: str(fd, "numberFormat") === "international" ? "international" : "indian",
     unitSystem: str(fd, "unitSystem") === "imperial" ? "imperial" : "metric",
     readingOverdueDays: Math.min(365, Math.max(1, int(fd, "readingOverdueDays") || 30)),
+    transferApproval: ["always", "cross_company", "never"].includes(str(fd, "transferApproval")) ? str(fd, "transferApproval") : ctx.org.transferApproval,
+    transferShotTolerance: Math.min(1_000_000, Math.max(0, int(fd, "transferShotTolerance"))),
   };
   const after = await db.organisation.update({ where: { id: ctx.org.id }, data });
   await audit(ctx, { action: "updated", entityType: "settings", entityId: ctx.org.id, entityLabel: after.name, before: ctx.org, after });

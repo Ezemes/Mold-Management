@@ -19,6 +19,10 @@ model Organisation {
   numberFormat String   @default("indian") // indian (lakh/crore) | international
   /// Days without a shot reading before an active mold is flagged overdue.
   readingOverdueDays Int @default(30)
+  /// always | cross_company | never — when transfer requests need approval
+  transferApproval   String @default("cross_company")
+  /// Shots allowed between the outbound and inbound handover readings before a dispute is raised
+  transferShotTolerance Int @default(50)
   status       String   @default("active") // active | suspended
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -33,6 +37,12 @@ model Organisation {
   assets      Asset[]
   audit       AuditEvent[]
   imports     ImportJob[]
+  transfers   Transfer[]
+  templates   MaintenanceTemplate[]
+  plans       MaintenancePlan[]
+  workOrders  WorkOrder[]
+  notifications Notification[]
+  attachments Attachment[]
 }
 
 model Division {
@@ -70,6 +80,9 @@ model Partner {
   ownedAssets      Asset[]      @relation("AssetOwner")
   custodyAssets    Asset[]      @relation("AssetCustodian")
   toolmakerAssets  Asset[]      @relation("AssetToolmaker")
+  transfersFrom    Transfer[]   @relation("TransferFromPartner")
+  transfersTo      Transfer[]   @relation("TransferToPartner")
+  workOrders       WorkOrder[]
 
   @@unique([orgId, name])
 }
@@ -98,7 +111,9 @@ model Site {
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
 
-  assets Asset[]
+  assets        Asset[]
+  transfersFrom Transfer[] @relation("TransferFromSite")
+  transfersTo   Transfer[] @relation("TransferToSite")
 
   @@unique([orgId, name])
 }
@@ -126,6 +141,9 @@ model User {
   audit          AuditEvent[]
   readings       MeterReading[]
   docVersions    DocumentVersion[]
+  notifications  Notification[]
+  assignedWork   WorkOrder[]      @relation("WorkOrderAssignee")
+  labor          WorkOrderLabor[]
 }
 
 /// A user's access to one organisation: one role plus a data scope.
@@ -312,6 +330,9 @@ model Asset {
   shotsBetweenRefurbs Int?
   refurbsAllowed     Int?
   refurbsDone        Int       @default(0)
+  /// Lifetime shots and date at the last completed refurbishment work order
+  lastRefurbShots    Int?
+  lastRefurbDate     DateTime?
   endOfLifeShots     Int?
   capitalisationDate DateTime?
   capitalValue       Decimal?  @db.Decimal(14, 2)
@@ -325,8 +346,11 @@ model Asset {
 
   cavities  Cavity[]
   products  AssetProduct[]
-  meters    Meter[]
-  documents Document[]
+  meters        Meter[]
+  documents     Document[]
+  transferItems TransferItem[]
+  plans         MaintenancePlan[]
+  workOrders    WorkOrder[]
 
   @@unique([orgId, number])
   @@index([orgId, siteId])
@@ -442,4 +466,270 @@ model ImportJob {
   createdById String?
   createdAt   DateTime     @default(now())
   appliedAt   DateTime?
+}
+
+// ─── Transfers (spec §4.1) ──────────────────────────────────────────────────
+
+/// draft → requested → approved → in_transit → completed, or rejected / cancelled; disputed if a handover does not reconcile.
+model Transfer {
+  id              String       @id @default(cuid())
+  orgId           String
+  org             Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  number          String
+  status          String       @default("draft")
+  reason          String       @default("production_move")
+  fromSiteId      String
+  fromSite        Site         @relation("TransferFromSite", fields: [fromSiteId], references: [id], onDelete: Restrict)
+  fromPartnerId   String?
+  fromPartner     Partner?     @relation("TransferFromPartner", fields: [fromPartnerId], references: [id], onDelete: Restrict)
+  toSiteId        String
+  toSite          Site         @relation("TransferToSite", fields: [toSiteId], references: [id], onDelete: Restrict)
+  toPartnerId     String?
+  toPartner       Partner?     @relation("TransferToPartner", fields: [toPartnerId], references: [id], onDelete: Restrict)
+  toLocationDetail String      @default("")
+  neededBy        DateTime?
+  notes           String       @default("")
+  requestedById   String?
+  requestedAt     DateTime?
+  approvedById    String?
+  approvedAt      DateTime?
+  rejectionReason String       @default("")
+  carrier         String       @default("")
+  trackingNumber  String       @default("")
+  vehicleNumber   String       @default("")
+  ewayBillNumber  String       @default("")
+  eta             DateTime?
+  shippedAt       DateTime?
+  shippedById     String?
+  receivedAt      DateTime?
+  receivedById    String?
+  completedAt     DateTime?
+  cancelledReason String       @default("")
+  createdById     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  items TransferItem[]
+
+  @@unique([orgId, number])
+  @@index([orgId, status])
+}
+
+model TransferItem {
+  id         String   @id @default(cuid())
+  transferId String
+  transfer   Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  assetId    String
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  /// pending | shipped | accepted | disputed | resolved
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+
+  handovers Handover[]
+  disputes  Dispute[]
+
+  @@unique([transferId, assetId])
+}
+
+model Handover {
+  id            String       @id @default(cuid())
+  itemId        String
+  item          TransferItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  direction     String // outbound | inbound
+  shotReading   Int?
+  /// Lifetime total after recording shotReading (null when the asset has no counter)
+  lifetimeShots Int?
+  /// [{ key, label, ok, note }]
+  checklist     Json         @default("[]")
+  conditionOk   Boolean      @default(true)
+  accessories   String       @default("")
+  notes         String       @default("")
+  tagVerified   Boolean      @default(false)
+  byUserId      String?
+  at            DateTime     @default(now())
+
+  @@unique([itemId, direction])
+}
+
+model Dispute {
+  id             String       @id @default(cuid())
+  itemId         String
+  item           TransferItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  kind           String // shot_mismatch | condition | missing_accessories | other
+  detail         String
+  outboundShots  Int?
+  inboundShots   Int?
+  status         String       @default("open") // open | resolved
+  resolution     String       @default("")
+  resolvedById   String?
+  resolvedAt     DateTime?
+  workOrderId    String?
+  createdAt      DateTime     @default(now())
+}
+
+// ─── Maintenance (spec §4.4) ────────────────────────────────────────────────
+
+model MaintenanceTemplate {
+  id             String       @id @default(cuid())
+  orgId          String
+  org            Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name           String
+  /// preventive | inspection | refurbishment
+  kind           String       @default("preventive")
+  description    String       @default("")
+  estimatedHours Float?
+  /// [{ id, text, type: check|measure|photo, unit, min, max, required }]
+  tasks          Json         @default("[]")
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  plans      MaintenancePlan[]
+  workOrders WorkOrder[]
+
+  @@unique([orgId, name])
+}
+
+/// A trigger on one asset: every N shots or every N days, warning at leadPct %.
+model MaintenancePlan {
+  id            String              @id @default(cuid())
+  orgId         String
+  org           Organisation        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assetId       String
+  asset         Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  templateId    String
+  template      MaintenanceTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  triggerType   String // shots | days
+  interval      Int
+  leadPct       Int                 @default(90)
+  /// Counter and date the interval is measured from (reset when its work order completes)
+  baselineShots Int                 @default(0)
+  baselineDate  DateTime            @default(now())
+  warnedAt      DateTime?
+  active        Boolean             @default(true)
+  createdAt     DateTime            @default(now())
+
+  workOrders WorkOrder[]
+
+  @@unique([assetId, templateId])
+}
+
+model WorkOrder {
+  id               String               @id @default(cuid())
+  orgId            String
+  org              Organisation         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  number           String
+  assetId          String
+  asset            Asset                @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  /// preventive | corrective | refurbishment | inspection | modification
+  type             String
+  title            String
+  description      String               @default("")
+  /// open | in_progress | on_hold | completed | cancelled
+  status           String               @default("open")
+  priority         String               @default("medium") // low | medium | high | urgent
+  assignedUserId   String?
+  assignedUser     User?                @relation("WorkOrderAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  /// Work done by a partner (e.g. the molder holding the mold)
+  assignedPartnerId String?
+  assignedPartner  Partner?             @relation(fields: [assignedPartnerId], references: [id], onDelete: SetNull)
+  planId           String?
+  plan             MaintenancePlan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+  templateId       String?
+  template         MaintenanceTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  /// manual | trigger | checklist_failure | dispute | quarantine
+  source           String               @default("manual")
+  sourceId         String               @default("")
+  scheduledDate    DateTime?
+  dueDate          DateTime?
+  /// For shot-triggered work: the counter value at which it falls due
+  dueAtShots       Int?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  completedById    String?
+  shotsAtCompletion Int?
+  /// [{ id, text, type, unit, min, max, required, result: pass|fail|na|null, value, note }]
+  checklist        Json                 @default("[]")
+  passPct          Float?
+  rootCause        String               @default("")
+  resolution       String               @default("")
+  externalCost     Decimal              @default(0) @db.Decimal(14, 2)
+  clearsQuarantine Boolean              @default(false)
+  signedByName     String               @default("")
+  signedAt         DateTime?
+  cancelReason     String               @default("")
+  createdById      String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  labor WorkOrderLabor[]
+  parts WorkOrderPart[]
+
+  @@unique([orgId, number])
+  @@index([orgId, status])
+  @@index([assetId, status])
+}
+
+model WorkOrderLabor {
+  id          String    @id @default(cuid())
+  workOrderId String
+  workOrder   WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workerName  String    @default("")
+  hours       Float
+  rate        Decimal   @default(0) @db.Decimal(10, 2)
+  note        String    @default("")
+  createdAt   DateTime  @default(now())
+}
+
+model WorkOrderPart {
+  id          String    @id @default(cuid())
+  workOrderId String
+  workOrder   WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  partNumber  String    @default("")
+  description String
+  quantity    Float
+  unitCost    Decimal   @default(0) @db.Decimal(14, 2)
+  createdAt   DateTime  @default(now())
+}
+
+// ─── Cross-cutting ──────────────────────────────────────────────────────────
+
+/// Files attached to handovers and work orders (asset documents use Document/DocumentVersion).
+model Attachment {
+  id           String       @id @default(cuid())
+  orgId        String
+  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  ownerType    String // handover | work_order
+  ownerId      String
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  storageKey   String       @unique
+  uploadedById String?
+  createdAt    DateTime     @default(now())
+
+  @@index([ownerType, ownerId])
+}
+
+model Notification {
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String
+  title     String
+  body      String       @default("")
+  link      String       @default("")
+  /// Prevents repeating the same alert (e.g. "reading-overdue:<asset>:<date>")
+  dedupeKey String?
+  readAt    DateTime?
+  emailedAt DateTime?
+  createdAt DateTime     @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt])
 }

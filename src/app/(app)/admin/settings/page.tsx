@@ -23,6 +23,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <Field label="Number format" hint={`Example: ${fmtNum(12345678, { numberFormat: o.numberFormat })} · ${fmtMoney(1250000, o)}`}><Select name="numberFormat" defaultValue={o.numberFormat} options={{ indian: "Indian (12,34,567)", international: "International (1,234,567)" }} /></Field>
           <Field label="Units"><Select name="unitSystem" defaultValue={o.unitSystem} options={{ metric: "Metric (mm, kg, t)", imperial: "Imperial (in, lb, US ton)" }} /></Field>
           <Field label="Shot reading overdue after (days)" hint="Active molds with no reading for this long are flagged."><Input name="readingOverdueDays" type="number" min={1} max={365} defaultValue={o.readingOverdueDays} /></Field>
+          <Field label="Transfers need approval" hint="Cross-company = whenever the holding company changes."><Select name="transferApproval" defaultValue={o.transferApproval} options={{ cross_company: "Cross-company transfers", always: "Always", never: "Never" }} /></Field>
+          <Field label="Handover shot tolerance" hint="Shots allowed between dispatch and receipt before a dispute is raised (e.g. trial shots)."><Input name="transferShotTolerance" type="number" min={0} defaultValue={o.transferShotTolerance} /></Field>
           {ctx.can("settings", "edit") && <div className="sm:col-span-2"><SubmitButton>Save settings</SubmitButton></div>}
         </form>
       </Card>
