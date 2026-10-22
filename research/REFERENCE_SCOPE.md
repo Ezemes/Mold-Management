@@ -1,15 +1,17 @@
 # Reference Scope
 
-Status: **BLOCKED — reference product identified (COAST Systems), but no
-application URL, account access or authorization has been supplied.** No reverse engineering of a Coast product has taken place.
+Status: **Public front-end pass complete (2026-10-22).** Reference URL
+identified as `https://sales.cscoast.com/`. COAST is a third party, so analysis is
+limited to what the site serves to unauthenticated visitors. Findings:
+`REA_FINDINGS_COAST.md`.
 
 ## 1. Materials supplied or authorized so far
 
 | # | Material | Supplied? | Notes |
 | --- | --- | --- | --- |
-| 1 | Reference application URL(s) | No | — |
+| 1 | Reference application URL(s) | Yes | `https://sales.cscoast.com/` (login redirects to `/maintenance/workorder`) |
 | 2 | Login credentials / demo tenant | No | — |
-| 3 | Written authorization to analyse the reference | No | Required: analysing a third party's SaaS can be restricted by its terms of service |
+| 3 | Written authorization to analyse the reference | No (third party) | User confirmed no ownership. Scope is limited to public, unauthenticated material; no login |
 | 4 | Installable client / mobile app | No | — |
 | 5 | Product documentation, manuals, training material | No | — |
 | 6 | HAR captures or screen recordings | No | — |

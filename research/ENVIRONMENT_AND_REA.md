@@ -91,3 +91,13 @@ analysis possible**; nothing was observed.
 
 The official product domain and login URL are still **unconfirmed**; web
 search returned no sign-in address for the mold platform.
+
+## 7. Public front-end pass (2026-10-22, later)
+
+The environment's network policy now allows `sales.cscoast.com`; `www.cscoast.com`
+and `app.cscoast.com` are still refused. Headless Chromium (CDP) loaded the
+public login page. The MCP `analyze_web_bundle` call timed out after 60 s on the
+5 MB main bundle, so the 29 public bundle files were downloaded and analysed with
+the REA CLI `analyze-javascript-application --max-heap-mb 3072` (5 min, evidence
+`ev_e08ead66…fd3e9`). Results: `REA_FINDINGS_COAST.md`. File identities:
+`evidence/rea/coast-bundle-manifest.txt`.
