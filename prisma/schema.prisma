@@ -1,0 +1,445 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Tenancy ────────────────────────────────────────────────────────────────
+
+/// The tenant: an OEM or molder that owns molds.
+model Organisation {
+  id           String   @id @default(cuid())
+  name         String
+  timezone     String   @default("Asia/Kolkata")
+  currency     String   @default("INR")
+  unitSystem   String   @default("metric") // metric | imperial
+  numberFormat String   @default("indian") // indian (lakh/crore) | international
+  /// Days without a shot reading before an active mold is flagged overdue.
+  readingOverdueDays Int @default(30)
+  status       String   @default("active") // active | suspended
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  divisions   Division[]
+  sites       Site[]
+  partners    Partner[]
+  memberships Membership[]
+  roles       Role[]
+  invites     Invite[]
+  assetTypes  AssetType[]
+  assets      Asset[]
+  audit       AuditEvent[]
+  imports     ImportJob[]
+}
+
+model Division {
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name      String
+  code      String       @default("")
+  createdAt DateTime     @default(now())
+  sites     Site[]
+
+  @@unique([orgId, name])
+}
+
+/// A linked company in the organisation's network: supplier, molder, toolmaker, warehouse or customer.
+model Partner {
+  id           String       @id @default(cuid())
+  orgId        String
+  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name         String
+  kind         String       @default("molder") // molder | toolmaker | warehouse | supplier | customer
+  code         String       @default("")
+  gstin        String       @default("")
+  contactName  String       @default("")
+  contactEmail String       @default("")
+  contactPhone String       @default("")
+  country      String       @default("IN")
+  status       String       @default("active") // active | inactive
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  sites            Site[]
+  memberships      Membership[]
+  invites          Invite[]
+  ownedAssets      Asset[]      @relation("AssetOwner")
+  custodyAssets    Asset[]      @relation("AssetCustodian")
+  toolmakerAssets  Asset[]      @relation("AssetToolmaker")
+
+  @@unique([orgId, name])
+}
+
+/// A physical place. partnerId null = the organisation's own site.
+model Site {
+  id         String       @id @default(cuid())
+  orgId      String
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  partnerId  String?
+  partner    Partner?     @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  divisionId String?
+  division   Division?    @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  name       String
+  code       String       @default("")
+  kind       String       @default("plant") // plant | warehouse | toolmaker | supplier
+  address    String       @default("")
+  city       String       @default("")
+  state      String       @default("")
+  country    String       @default("IN")
+  postalCode String       @default("")
+  timezone   String       @default("Asia/Kolkata")
+  latitude   Float?
+  longitude  Float?
+  active     Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  assets Asset[]
+
+  @@unique([orgId, name])
+}
+
+// ─── Identity & access ──────────────────────────────────────────────────────
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String?
+  firstName       String    @default("")
+  lastName        String    @default("")
+  phone           String    @default("")
+  platformRole    String? // platform_operator
+  status          String    @default("active") // active | suspended
+  emailVerifiedAt DateTime?
+  otpCode         String?
+  otpExpiresAt    DateTime?
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  memberships    Membership[]
+  passwordResets PasswordReset[]
+  audit          AuditEvent[]
+  readings       MeterReading[]
+  docVersions    DocumentVersion[]
+}
+
+/// A user's access to one organisation: one role plus a data scope.
+model Membership {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId     String
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  roleId    String
+  role      Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  /// all | sites | divisions | partner
+  scopeType String       @default("all")
+  scopeIds  String[]     @default([])
+  /// Set for supplier users: they only see molds in this partner's custody.
+  partnerId String?
+  partner   Partner?     @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  status    String       @default("active") // active | suspended
+  createdAt DateTime     @default(now())
+
+  @@unique([userId, orgId])
+}
+
+model Role {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  key         String? // built-in role key; null for custom roles
+  name        String
+  description String       @default("")
+  /// { [module]: action[] }
+  permissions Json         @default("{}")
+  /// Supplier roles are always scoped to a partner and use the simplified navigation.
+  isSupplier  Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  memberships Membership[]
+  invites     Invite[]
+
+  @@unique([orgId, name])
+}
+
+model Invite {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  email       String
+  roleId      String
+  role        Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  scopeType   String       @default("all")
+  scopeIds    String[]     @default([])
+  partnerId   String?
+  partner     Partner?     @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  token       String       @unique
+  status      String       @default("pending") // pending | accepted | revoked
+  invitedById String?
+  expiresAt   DateTime
+  createdAt   DateTime     @default(now())
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+/// Append-only. A database trigger rejects UPDATE and DELETE (see migration).
+model AuditEvent {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String
+  entityType  String
+  entityId    String       @default("")
+  entityLabel String       @default("")
+  before      Json?
+  after       Json?
+  reason      String       @default("")
+  createdAt   DateTime     @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([orgId, entityType, entityId])
+}
+
+// ─── Assets ─────────────────────────────────────────────────────────────────
+
+model AssetType {
+  id           String       @id @default(cuid())
+  orgId        String
+  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  key          String
+  name         String
+  /// mold | press | equipment. Drives which standard fields and tabs are shown.
+  kind         String       @default("equipment")
+  description  String       @default("")
+  numberPrefix String       @default("")
+  /// { components, cavities, products, meters, documents } booleans
+  features     Json         @default("{}")
+  archived     Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  fields FieldDef[]
+  assets Asset[]
+
+  @@unique([orgId, key])
+}
+
+model FieldDef {
+  id          String    @id @default(cuid())
+  assetTypeId String
+  assetType   AssetType @relation(fields: [assetTypeId], references: [id], onDelete: Cascade)
+  key         String
+  label       String
+  type        String // text | number | date | boolean | picklist | formula
+  unit        String    @default("")
+  options     String[]  @default([])
+  formula     String    @default("")
+  required    Boolean   @default(false)
+  section     String    @default("Additional")
+  helpText    String    @default("")
+  sortOrder   Int       @default(0)
+  archived    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@unique([assetTypeId, key])
+}
+
+model Asset {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assetTypeId String
+  assetType   AssetType    @relation(fields: [assetTypeId], references: [id], onDelete: Restrict)
+  number      String
+  name        String
+  /// active | in_transfer | in_maintenance | refurbishing | quarantined | retired | scrapped
+  status      String       @default("active")
+  qrToken     String       @unique
+
+  // Ownership / custody / location / assignment (spec §3.2). null partner = the organisation itself.
+  ownerPartnerId     String?
+  ownerPartner       Partner? @relation("AssetOwner", fields: [ownerPartnerId], references: [id], onDelete: Restrict)
+  custodianPartnerId String?
+  custodianPartner   Partner? @relation("AssetCustodian", fields: [custodianPartnerId], references: [id], onDelete: Restrict)
+  siteId             String
+  site               Site     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  locationDetail     String   @default("")
+  program            String   @default("")
+  assignment         String   @default("")
+
+  // Hierarchy: components belong to a parent asset.
+  parentId      String?
+  parent        Asset?  @relation("AssetComponents", fields: [parentId], references: [id], onDelete: SetNull)
+  components    Asset[] @relation("AssetComponents")
+  componentRole String  @default("") // insert | core | cavity block | slide | lifter | hot runner | other
+
+  // Mold design (standard fields; shown for kind = mold)
+  toolNumber        String  @default("")
+  designCavities    Int?
+  designCycleTimeS  Float?
+  shotWeightG       Float?
+  material          String  @default("")
+  lengthMm          Float?
+  widthMm           Float?
+  heightMm          Float?
+  weightKg          Float?
+  clampTonnageT     Float?
+  hotRunnerZones    Int?
+  coolingCircuits   Int?
+
+  // Life
+  toolmakerPartnerId String?
+  toolmakerPartner   Partner?  @relation("AssetToolmaker", fields: [toolmakerPartnerId], references: [id], onDelete: SetNull)
+  buildDate          DateTime?
+  warrantyShots      Int?
+  shotsBetweenRefurbs Int?
+  refurbsAllowed     Int?
+  refurbsDone        Int       @default(0)
+  endOfLifeShots     Int?
+  capitalisationDate DateTime?
+  capitalValue       Decimal?  @db.Decimal(14, 2)
+  costCentre         String    @default("")
+
+  customValues Json      @default("{}")
+  notes        String    @default("")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  cavities  Cavity[]
+  products  AssetProduct[]
+  meters    Meter[]
+  documents Document[]
+
+  @@unique([orgId, number])
+  @@index([orgId, siteId])
+  @@index([orgId, custodianPartnerId])
+}
+
+model Cavity {
+  id            String   @id @default(cuid())
+  assetId       String
+  asset         Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  identifier    String
+  status        String   @default("active") // active | blocked
+  blockedReason String   @default("")
+  createdAt     DateTime @default(now())
+
+  @@unique([assetId, identifier])
+}
+
+model AssetProduct {
+  id           String   @id @default(cuid())
+  assetId      String
+  asset        Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  partNumber   String
+  partName     String   @default("")
+  /// For family molds: how many cavities produce this part.
+  cavitiesUsed Int?
+  customer     String   @default("")
+  createdAt    DateTime @default(now())
+
+  @@unique([assetId, partNumber])
+}
+
+model Meter {
+  id            String    @id @default(cuid())
+  assetId       String
+  asset         Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  kind          String    @default("shots") // shots | hours
+  name          String    @default("Shot counter")
+  unit          String    @default("shots")
+  /// Lifetime total = last raw counter value + offset. Offset grows when a counter is reset or replaced.
+  offset        Int       @default(0)
+  lastRawValue  Int?
+  lifetimeTotal Int       @default(0)
+  lastReadingAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  readings MeterReading[]
+
+  @@unique([assetId, kind])
+}
+
+model MeterReading {
+  id          String   @id @default(cuid())
+  meterId     String
+  meter       Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  rawValue    Int
+  lifetime    Int
+  delta       Int
+  readAt      DateTime
+  source      String   @default("manual") // manual | import | handover | api
+  isReset     Boolean  @default(false)
+  resetReason String   @default("")
+  note        String   @default("")
+  enteredById String?
+  enteredBy   User?    @relation(fields: [enteredById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([meterId, readAt])
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title     String
+  category  String   @default("other") // drawing | trial_report | certificate | photo | qualification | manual | other
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions DocumentVersion[]
+}
+
+model DocumentVersion {
+  id           String   @id @default(cuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version      Int
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  storageKey   String   @unique
+  note         String   @default("")
+  uploadedById String?
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@unique([documentId, version])
+}
+
+model ImportJob {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  kind        String // assets | readings
+  filename    String
+  status      String       @default("validated") // validated | applied | failed
+  rowCount    Int          @default(0)
+  errorCount  Int          @default(0)
+  /// Parsed, validated rows awaiting apply.
+  payload     Json         @default("[]")
+  errors      Json         @default("[]")
+  createdById String?
+  createdAt   DateTime     @default(now())
+  appliedAt   DateTime?
+}
