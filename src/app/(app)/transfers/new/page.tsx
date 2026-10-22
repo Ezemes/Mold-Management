@@ -3,7 +3,7 @@ import { assetScope, requireOrg } from "@/lib/auth";
 import { needsApproval, TRANSFER_REASONS } from "@/lib/transfers";
 import { Card, Field, FlashFromParams, Input, Notice, PageHeader, Select, Textarea } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
-import { createTransferAction } from "../actions";
+import { createAndSubmitTransferAction, createTransferAction } from "../actions";
 
 export const metadata = { title: "New transfer" };
 
@@ -33,8 +33,8 @@ export default async function NewTransferPage({ searchParams }: { searchParams: 
           <Field label="Needed by"><Input name="neededBy" type="date" /></Field>
           <Field label="Notes" className="sm:col-span-2"><Textarea name="notes" /></Field>
           <div className="flex gap-2 sm:col-span-2">
-            <SubmitButton name="submit" value="1">Create and submit</SubmitButton>
-            <SubmitButton name="submit" value="0" variant="secondary">Save as draft</SubmitButton>
+            <SubmitButton formAction={createAndSubmitTransferAction}>Create and submit</SubmitButton>
+            <SubmitButton variant="secondary">Save as draft</SubmitButton>
           </div>
           {pre && needsApproval(policy, pre.site.partnerId, null) && <p className="text-xs text-ink-500 sm:col-span-2">{pre.number} is currently at {pre.site.name}.</p>}
         </form>

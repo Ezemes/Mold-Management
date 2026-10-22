@@ -5,6 +5,9 @@ export const WO_STATUS = { open: "Open", in_progress: "In progress", on_hold: "O
 export const WO_PRIORITY = { low: "Low", medium: "Medium", high: "High", urgent: "Urgent" } as const;
 export const TEMPLATE_KINDS = { preventive: "Preventive maintenance", inspection: "Inspection", refurbishment: "Refurbishment" } as const;
 export const OPEN_WO: string[] = ["open", "in_progress", "on_hold"];
+/** Maps work-order statuses onto the shared badge colours. */
+export const WO_BADGE: Record<string, string> = { open: "pending", in_progress: "validated", on_hold: "overdue", completed: "active", cancelled: "archived" };
+export const PRIORITY_COLOR = { urgent: "red", high: "amber", medium: "blue", low: "gray" } as const;
 
 export type TaskDef = { id: string; text: string; type: "check" | "measure" | "photo"; unit?: string; min?: number | null; max?: number | null; required: boolean };
 export type TaskResult = TaskDef & { result: "pass" | "fail" | "na" | null; value?: number | null; note?: string };

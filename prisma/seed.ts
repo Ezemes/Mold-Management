@@ -7,6 +7,7 @@ import { PrismaClient, type Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { setupOrganisation } from "../src/lib/org-setup";
+import { parseTaskLines } from "../src/lib/maintenance.pure";
 
 const db = new PrismaClient();
 const PASSWORD = "Demo@12345";
@@ -95,6 +96,44 @@ async function main() {
       }
       await tx.auditEvent.create({ data: { orgId: org.id, userId: admin.id, action: "created", entityType: "asset", entityId: a.id, entityLabel: `${number} ${name}`, reason: "Demo data" } });
     }
+    // ── Maintenance: templates, plans in each state, one triggered and one completed work order
+    const pm = await tx.maintenanceTemplate.create({
+      data: {
+        orgId: org.id, name: "50k shot PM", kind: "preventive", estimatedHours: 4, description: "Routine service every 50,000 shots",
+        tasks: parseTaskLines("Clean parting line and vents\nCheck ejector pins and return springs\nGrease guide pillars and bushes\nmeasure: Cooling flow, circuit A [l/min] (8-12)\nphoto: Core side after cleaning\n* Check hot runner zone temperatures") as unknown as Prisma.InputJsonValue,
+      },
+    });
+    const insp = await tx.maintenanceTemplate.create({
+      data: { orgId: org.id, name: "Half-yearly inspection", kind: "inspection", estimatedHours: 2, tasks: parseTaskLines("Visual check for cracks and corrosion\nCheck water lines and fittings for leaks\nVerify QR tag is legible") as unknown as Prisma.InputJsonValue },
+    });
+    await tx.maintenanceTemplate.create({
+      data: { orgId: org.id, name: "Refurbishment", kind: "refurbishment", estimatedHours: 40, tasks: parseTaskLines("Strip and inspect all inserts\nReplace worn ejector pins\nRe-polish cavity surfaces\nmeasure: Parting line flatness [mm] (0-0.02)\nTrial run and first-article approval") as unknown as Prisma.InputJsonValue },
+    });
+    const byNum = Object.fromEntries((await tx.asset.findMany({ where: { orgId: org.id }, include: { meters: true } })).map((a) => [a.number, a]));
+    const plan = (n: string, templateId: string, triggerType: string, interval: number, baselineShots: number, daysAgo: number) =>
+      tx.maintenancePlan.create({ data: { orgId: org.id, assetId: byNum[n].id, templateId, triggerType, interval, baselineShots, baselineDate: new Date(Date.now() - daysAgo * day) } });
+    await plan("M-0001", pm.id, "shots", 50_000, 370_000, 60); // 84% — on track
+    await plan("M-0002", pm.id, "shots", 50_000, 360_000, 60); // 91% — due soon
+    const due = await plan("M-0004", pm.id, "shots", 50_000, 920_000, 90); // 120% — due
+    await plan("M-0006", insp.id, "days", 180, 0, 150); // 83% of the calendar interval
+    const pmTasks = (pm.tasks as unknown as object[]).map((t) => ({ ...t, result: null, value: null, note: "" }));
+    await tx.workOrder.create({
+      data: {
+        orgId: org.id, number: "WO-00001", assetId: byNum["M-0004"].id, type: "preventive", title: "50k shot PM", planId: due.id, templateId: pm.id, source: "trigger", sourceId: due.id,
+        dueDate: new Date(Date.now() + 2 * day), dueAtShots: 970_000, assignedPartnerId: brightway.id, checklist: pmTasks as unknown as Prisma.InputJsonValue,
+      },
+    });
+    const done = await tx.workOrder.create({
+      data: {
+        orgId: org.id, number: "WO-00002", assetId: byNum["M-0003"].id, type: "corrective", title: "Flash on louvre blade 3", status: "completed", priority: "high",
+        createdAt: new Date(Date.now() - 20 * day), startedAt: new Date(Date.now() - 19 * day), completedAt: new Date(Date.now() - 18 * day), dueDate: new Date(Date.now() - 17 * day),
+        rootCause: "Worn parting line at cavity 3", resolution: "Parting line re-ground and polished", assignedUserId: tech.id, completedById: tech.id, signedByName: "Suresh Patil", signedAt: new Date(Date.now() - 18 * day),
+        shotsAtCompletion: 1_350_000, externalCost: 12_000, createdById: tooling.id,
+      },
+    });
+    await tx.workOrderLabor.create({ data: { workOrderId: done.id, userId: tech.id, workerName: "Suresh Patil", hours: 6, rate: 450 } });
+    await tx.workOrderPart.create({ data: { workOrderId: done.id, partNumber: "EJ-6x150", description: "Ejector pin 6 × 150", quantity: 4, unitCost: 380 } });
+
     const press = await tx.asset.create({ data: { orgId: org.id, assetTypeId: types.press.id, number: "P-0001", name: "Engel 350t #1", qrToken: randomBytes(12).toString("hex"), siteId: pune.id, clampTonnageT: 350, hotRunnerZones: 12 } });
     void press;
   });

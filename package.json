@@ -12,7 +12,8 @@
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "postinstall": "prisma generate",
-    "test:e2e": "node e2e/acceptance.mjs"
+    "test:e2e": "node e2e/acceptance.mjs",
+    "test:e2e:3b": "node e2e/phase3b.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",

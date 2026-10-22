@@ -7,6 +7,8 @@ import { label } from "@/lib/labels";
 import { fmtDate, fmtDateTime, fmtNum } from "@/lib/format";
 import { Badge, Card, EmptyState, LinkButton, Notice, PageHeader, Stat } from "@/components/ui";
 import { LifeBar } from "@/components/life-bar";
+import { OPEN_WO, workOrderScope } from "@/lib/maintenance";
+import { transferScope } from "@/lib/transfers";
 
 export const metadata = { title: "Dashboard" };
 
@@ -25,6 +27,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const byStatus = Object.entries(ASSET_STATUS).map(([k, v]) => [v, rows.filter((r) => r.a.status === k).length] as const).filter(([, n]) => n);
   const byCustodian = [...rows.reduce((m, r) => m.set(custodianName(r.a, ctx.org.name), (m.get(custodianName(r.a, ctx.org.name)) ?? 0) + 1), new Map<string, number>())].sort((x, y) => y[1] - x[1]);
   const recent = ctx.can("audit") ? await db.auditEvent.findMany({ where: { orgId: ctx.org.id }, orderBy: { createdAt: "desc" }, take: 8, include: { user: true } }) : [];
+  const now = new Date();
+  const [openWo, overdueWo, transit] = await Promise.all([
+    ctx.can("maintenance") ? db.workOrder.count({ where: { AND: [workOrderScope(ctx), { status: { in: OPEN_WO } }] } }) : 0,
+    ctx.can("maintenance") ? db.workOrder.count({ where: { AND: [workOrderScope(ctx), { status: { in: OPEN_WO }, dueDate: { lt: now } }] } }) : 0,
+    ctx.can("transfers") ? db.transfer.count({ where: { AND: [transferScope(ctx), { status: { in: ["requested", "approved", "in_transit", "disputed"] } }] } }) : 0,
+  ]);
   const greeting = ctx.user.firstName ? `Hello, ${ctx.user.firstName}` : "Hello";
 
   return (
@@ -49,6 +57,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <Stat label="Near end of life" value={nearEol.length} hint="≥ 80% of end-of-life shots" />
             <Stat label="Lifetime shots (molds)" value={fmtNum(molds.reduce((s, r) => s + (r.l.lifetimeShots ?? 0), 0), ctx.org)} />
           </div>
+          {(ctx.can("maintenance") || ctx.can("transfers")) && (
+            <div className="mb-6 grid gap-4 sm:grid-cols-3">
+              {ctx.can("maintenance") && <Stat label="Open work orders" value={openWo} hint={<Link href="/maintenance?view=open" className="text-brand-700 hover:underline">View work orders</Link>} />}
+              {ctx.can("maintenance") && <Stat label="Overdue work" value={overdueWo} hint={<Link href="/maintenance?view=overdue" className="text-brand-700 hover:underline">Past due date</Link>} />}
+              {ctx.can("transfers") && <Stat label="Transfers in progress" value={transit} hint={<Link href="/transfers?view=open" className="text-brand-700 hover:underline">Requested, shipped or disputed</Link>} />}
+            </div>
+          )}
           <div className="grid gap-6 lg:grid-cols-3">
             <Card title="Shot readings overdue" className="lg:col-span-2">
               {overdue.length === 0 ? <p className="text-sm text-ink-500">All active molds have a recent reading.</p> : (

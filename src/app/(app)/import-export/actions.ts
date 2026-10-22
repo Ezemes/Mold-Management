@@ -7,6 +7,7 @@ import { assertCan, assetScope, requireOrg, siteScope, type Ctx } from "@/lib/au
 import { audit } from "@/lib/audit";
 import { features } from "@/lib/assets";
 import { parseCsv, planAssetImport, planReadingImport, type AssetLookups, type MeterState } from "@/lib/importer";
+import { afterReadings } from "@/lib/maintenance";
 import { recordReading } from "@/lib/meters";
 import { str, token } from "@/lib/forms";
 
@@ -119,5 +120,6 @@ export async function applyImportAction(fd: FormData) {
     },
     { timeout: 300_000, maxWait: 10_000 },
   );
+  if (job.kind !== "assets") await afterReadings(ctx.org.id, [...new Set((result.plans as ReturnType<typeof planReadingImport>["plans"]).map((p) => p.assetId))]);
   back(path, job.kind === "assets" ? `Imported: ${created} created, ${updated} updated.` : `Imported ${created} readings.`, "ok");
 }

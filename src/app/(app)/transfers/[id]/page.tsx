@@ -7,7 +7,7 @@ import { label } from "@/lib/labels";
 import { dateToLocalInput, fmtDate, fmtDateTime, fmtNum } from "@/lib/format";
 import { Badge, Card, Field, FlashFromParams, Input, Notice, PageHeader, Select, Table, Td, Textarea } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
-import { cancelTransferAction, decideTransferAction, receiveTransferAction, resolveDisputeAction, shipTransferAction, submitTransferAction } from "../actions";
+import { approveTransferAction, cancelTransferAction, rejectTransferAction, receiveTransferAction, resolveDisputeAction, shipTransferAction, submitTransferAction } from "../actions";
 
 const STEPS = ["requested", "approved", "in_transit", "completed"] as const;
 const STEP_LABEL = { requested: "Requested", approved: "Approved", in_transit: "Shipped", completed: "Received" };
@@ -141,11 +141,11 @@ export default async function TransferPage({ params, searchParams }: { params: P
 
           {canDecide && (
             <Card title="Approve this transfer?">
-              <form action={decideTransferAction} className="flex flex-wrap items-end gap-2">
+              <form action={approveTransferAction} className="flex flex-wrap items-end gap-2">
                 {hid}
                 <Field label="Comment (required to reject)" className="min-w-64 flex-1"><Input name="reason" /></Field>
-                <SubmitButton name="decision" value="approve">Approve</SubmitButton>
-                <SubmitButton name="decision" value="reject" variant="danger">Reject</SubmitButton>
+                <SubmitButton formAction={approveTransferAction}>Approve</SubmitButton>
+                <SubmitButton formAction={rejectTransferAction} variant="danger">Reject</SubmitButton>
               </form>
             </Card>
           )}

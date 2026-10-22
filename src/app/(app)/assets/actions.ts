@@ -10,6 +10,7 @@ import { readFieldValues } from "@/lib/asset-values";
 import { ALLOWED_MIME, MAX_UPLOAD_BYTES, putFile } from "@/lib/storage";
 import { recordReading, ReadingError } from "@/lib/meters";
 import { openTransferFor } from "@/lib/transfers";
+import { afterReadings, raiseQuarantineWorkOrder } from "@/lib/maintenance";
 import { str, token } from "@/lib/forms";
 import { nextNumber } from "@/lib/asset-number";
 import { localInputToDate } from "@/lib/format";
@@ -153,9 +154,17 @@ export async function setStatusAction(fd: FormData) {
   if (a.status === "in_transfer") back(`/assets/${a.id}`, "The asset is in a transfer.");
   const reason = str(fd, "reason");
   if (["quarantined", "scrapped", "retired"].includes(status) && !reason) back(`/assets/${a.id}`, `Give a reason for setting the status to ${ASSET_STATUS[status as keyof typeof ASSET_STATUS]}.`);
-  await db.asset.update({ where: { id: a.id }, data: { status } });
-  await audit(ctx, { action: "status_changed", entityType: "asset", entityId: a.id, entityLabel: `${a.number} ${a.name}`, before: { status: a.status }, after: { status }, reason });
-  back(`/assets/${a.id}`, "Status updated.", "ok");
+  if (a.status === "quarantined" && status !== "quarantined" && status !== "scrapped") {
+    const clearing = await db.workOrder.findFirst({ where: { assetId: a.id, clearsQuarantine: true, status: { in: ["open", "in_progress", "on_hold"] } } });
+    if (clearing) back(`/assets/${a.id}`, `Quarantine is lifted by completing work order ${clearing.number}.`);
+  }
+  const wo = await db.$transaction(async (tx) => {
+    await tx.asset.update({ where: { id: a.id }, data: { status } });
+    await audit(ctx, { action: "status_changed", entityType: "asset", entityId: a.id, entityLabel: `${a.number} ${a.name}`, before: { status: a.status }, after: { status }, reason }, tx);
+    if (status === "quarantined" && a.status !== "quarantined") return raiseQuarantineWorkOrder(tx, ctx, a, reason);
+    return null;
+  });
+  back(`/assets/${a.id}`, wo ? `Quarantined. Work order ${wo.number} must be completed to release it.` : "Status updated.", "ok");
 }
 
 export async function deleteAssetAction(fd: FormData) {
@@ -326,5 +335,6 @@ export async function addReadingAction(fd: FormData) {
     msg = e.message + (e.code === "implausible" ? " [confirm]" : "");
   }
   if (msg) back(ret, msg);
+  await afterReadings(ctx.org.id, [a.id]);
   back(ret, "Reading saved.", "ok");
 }

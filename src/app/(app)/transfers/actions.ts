@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { assertCan, assetScope, requireOrg, siteScope, type Ctx } from "@/lib/auth";
+import { assertCan, assetScope, requireOrg, type Ctx } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { recordReading, ReadingError } from "@/lib/meters";
 import { notify, recipientsFor, emailPending } from "@/lib/notify";
@@ -24,6 +24,7 @@ import {
   type TransferEvent,
 } from "@/lib/transfers";
 import { nextWorkOrderNumber } from "@/lib/work-orders";
+import { afterReadings } from "@/lib/maintenance";
 import { str } from "@/lib/forms";
 
 function back(path: string, msg: string, kind: "error" | "ok" = "error"): never {
@@ -48,6 +49,14 @@ const label = (t: { number: string }) => t.number;
 // ─── Create & submit ────────────────────────────────────────────────────────
 
 export async function createTransferAction(fd: FormData) {
+  await createTransfer(fd, false);
+}
+
+export async function createAndSubmitTransferAction(fd: FormData) {
+  await createTransfer(fd, true);
+}
+
+async function createTransfer(fd: FormData, andSubmit: boolean) {
   const ctx = await requireOrg();
   assertCan(ctx, "transfers", "create");
   const numbers = [...new Set(str(fd, "assets").split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean))];
@@ -84,8 +93,8 @@ export async function createTransferAction(fd: FormData) {
     await audit(ctx, { action: "created", entityType: "transfer", entityId: t.id, entityLabel: number, after: { from: from.name, to: toSite.name, assets: assets.map((a) => a.number), reason } }, tx);
     return t;
   });
-  if (str(fd, "submit") === "1") await submit(ctx, t.id);
-  back(`/transfers/${t.id}`, `Transfer ${t.number} created${str(fd, "submit") === "1" ? " and submitted" : " as a draft"}.`, "ok");
+  if (andSubmit) await submit(ctx, t.id);
+  back(`/transfers/${t.id}`, `Transfer ${t.number} created${andSubmit ? " and submitted" : " as a draft"}.`, "ok");
 }
 
 async function submit(ctx: Ctx, id: string) {
@@ -111,12 +120,19 @@ export async function submitTransferAction(fd: FormData) {
   back(`/transfers/${str(fd, "id")}`, "Submitted.", "ok");
 }
 
-export async function decideTransferAction(fd: FormData) {
+export async function approveTransferAction(fd: FormData) {
+  await decide(fd, true);
+}
+
+export async function rejectTransferAction(fd: FormData) {
+  await decide(fd, false);
+}
+
+async function decide(fd: FormData, approve: boolean) {
   const ctx = await requireOrg();
   assertCan(ctx, "transfers", "approve");
   if (ctx.isSupplier) back("/transfers", "Approvals are made by the organisation.");
   const t = await loadTransfer(ctx, str(fd, "id"));
-  const approve = str(fd, "decision") === "approve";
   guard(t, approve ? "approve" : "reject");
   const reason = str(fd, "reason");
   if (!approve && !reason) back(`/transfers/${t.id}`, "Give a reason for rejecting.");
@@ -208,6 +224,7 @@ export async function shipTransferAction(fd: FormData) {
     error = `${e.message} Correct the counter on the asset first if it was reset.`;
   }
   if (error) back(path, error);
+  await afterReadings(ctx.org.id, t.items.map((it) => it.assetId));
   await notify(ctx.org.id, await recipientsFor(ctx.org.id, "transfers", "edit", { siteId: t.toSiteId, partnerIds: [t.toPartnerId] }), { kind: "transfer_receive", title: `Incoming transfer ${t.number}`, body: `${t.items.length} asset(s) dispatched from ${t.fromSite.name}. Record receipt when they arrive.`, link: path }, { exceptUserId: ctx.user.id });
   back(path, "Dispatch recorded. The sender stays responsible until the receiver confirms receipt.", "ok");
 }
@@ -219,7 +236,7 @@ export async function receiveTransferAction(fd: FormData) {
   const path = `/transfers/${t.id}`;
   guard(t, "receive");
   if (!actsFor(ctx, t.toSite)) back(path, `Only ${t.toSite.name} can confirm receipt.`);
-  let files: Record<string, Awaited<ReturnType<typeof storeUploads>>> = {};
+  const files: Record<string, Awaited<ReturnType<typeof storeUploads>>> = {};
   let error = "";
   try {
     for (const it of t.items) files[it.id] = await storeUploads(ctx.org.id, fd.getAll(`${it.id}.photos`));
@@ -282,6 +299,7 @@ export async function receiveTransferAction(fd: FormData) {
     error = e.message;
   }
   if (error) back(path, error);
+  await afterReadings(ctx.org.id, t.items.map((it) => it.assetId));
   const watchers = [t.createdById, t.requestedById, t.approvedById].filter((x): x is string => !!x);
   if (disputes) {
     const approvers = await recipientsFor(ctx.org.id, "transfers", "approve", { siteId: t.fromSiteId });

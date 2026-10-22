@@ -10,6 +10,7 @@ import { DELETION_REASON_HINT } from "@/lib/copy";
 import { Badge, btnClass, Card, cx, EmptyState, Field, FlashFromParams, Input, Notice, PageHeader, Select, Stat, Table, Td } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
 import { LifeBar } from "@/components/life-bar";
+import { planState, woCost, WO_BADGE, WO_STATUS, WO_TYPES, workOrderScope } from "@/lib/maintenance";
 import {
   addProductAction,
   addReadingAction,
@@ -31,6 +32,7 @@ const TABS = [
   ["components", "Components & cavities"],
   ["counter", "Shot counter"],
   ["documents", "Documents"],
+  ["maintenance", "Maintenance"],
   ["custody", "Custody & transfers"],
   ["history", "History"],
 ] as const;
@@ -45,7 +47,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
   const org = ctx.org;
   const tz = org.timezone;
   const kind = a.assetType.kind;
-  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
+  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "maintenance" ? ctx.can("maintenance") : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
   const tab = tabs.find(([k]) => k === sp.tab)?.[0] ?? "overview";
   const hid = <input type="hidden" name="id" value={a.id} />;
   const canEdit = ctx.can("assets", "edit");
@@ -59,6 +61,10 @@ export default async function PassportPage({ params, searchParams }: { params: P
     orderBy: { createdAt: "desc" },
   }) : [];
   const corrections = tab === "custody" ? await db.auditEvent.findMany({ where: { orgId: org.id, entityType: "asset", entityId: a.id, action: { in: ["custody_corrected", "created"] } }, orderBy: { createdAt: "desc" }, include: { user: true } }) : [];
+  const [plans, workOrders] = tab === "maintenance" ? await Promise.all([
+    db.maintenancePlan.findMany({ where: { assetId: a.id }, include: { template: true }, orderBy: { createdAt: "asc" } }),
+    db.workOrder.findMany({ where: { AND: [workOrderScope(ctx), { assetId: a.id }] }, include: { labor: true, parts: true }, orderBy: { createdAt: "desc" }, take: 100 }),
+  ]) : [[], []];
   const [readings, history, moveSites, allSites] = await Promise.all([
     tab === "counter" && live.shots ? db.meterReading.findMany({ where: { meterId: live.shots.id }, orderBy: { readAt: "desc" }, take: 100, include: { enteredBy: true } }) : Promise.resolve([]),
     tab === "history" ? db.auditEvent.findMany({ where: { orgId: org.id, entityType: "asset", entityId: a.id }, orderBy: { createdAt: "desc" }, take: 100, include: { user: true } }) : Promise.resolve([]),
@@ -141,7 +147,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
                 <form action={setStatusAction} className="space-y-3">
                   {hid}
                   <Field label="Status"><Select name="status" defaultValue={a.status} options={Object.fromEntries(Object.entries(ASSET_STATUS).filter(([k]) => k !== "in_transfer"))} /></Field>
-                  <Field label="Reason" hint="Required for quarantined, retired and scrapped."><Input name="reason" /></Field>
+                  <Field label="Reason" hint="Required for quarantined, retired and scrapped. Quarantine raises a release work order that must be completed to lift it."><Input name="reason" /></Field>
                   <SubmitButton size="sm" variant="secondary">Update status</SubmitButton>
                 </form>
               ) : (
@@ -356,6 +362,50 @@ export default async function PassportPage({ params, searchParams }: { params: P
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === "maintenance" && (
+        <div className="space-y-6">
+          <Card
+            title="Plans"
+            actions={ctx.can("maintenance", "create") && !ctx.isSupplier && <Link href={`/maintenance/plans?asset=${encodeURIComponent(a.number)}`} className={btnClass("secondary", "sm")}>Add plan</Link>}
+          >
+            {plans.length === 0 ? <p className="text-sm text-ink-500">No maintenance plan. Add one to raise work orders automatically by shots or calendar.</p> : (
+              <div className="space-y-3">
+                {plans.map((pl) => {
+                  const st = planState(pl, live.shots?.lifetimeTotal ?? null);
+                  return (
+                    <div key={pl.id} className={cx("text-sm", !pl.active && "opacity-50")}>
+                      <div className="flex flex-wrap justify-between gap-2">
+                        <span className="font-medium">{pl.template.name} · every {fmtNum(pl.interval, org)} {pl.triggerType}{!pl.active && " (paused)"}</span>
+                        <span className="text-xs text-ink-500">{fmtNum(st.remaining, org)} {st.unit} to go · next at {st.unit === "shots" ? `${fmtNum(st.dueAtShots, org)} shots` : fmtDate(st.dueDate, tz)}</span>
+                      </div>
+                      <div className="mt-1 h-2 overflow-hidden rounded-full bg-gray-100">
+                        <div className={cx("h-full", st.status === "due" ? "bg-red-500" : st.status === "due_soon" ? "bg-amber-500" : "bg-emerald-500")} style={{ width: `${Math.min(100, st.progress * 100)}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+          <Card
+            title="Work orders"
+            actions={ctx.can("maintenance", "create") && <Link href={`/maintenance/work-orders/new?asset=${encodeURIComponent(a.number)}`} className={btnClass("secondary", "sm")}>New work order</Link>}
+          >
+            <Table head={["Work order", "Type", "Status", "Due / done", "Cost"]} empty="No work orders yet.">
+              {workOrders.map((w) => (
+                <tr key={w.id}>
+                  <Td><Link href={`/maintenance/work-orders/${w.id}`} className="font-medium hover:text-brand-700">{w.number}</Link><p className="text-xs text-ink-500">{w.title}</p></Td>
+                  <Td className="text-xs">{label(WO_TYPES, w.type)}</Td>
+                  <Td><Badge status={WO_BADGE[w.status]}>{label(WO_STATUS, w.status)}</Badge></Td>
+                  <Td className="text-xs">{w.completedAt ? `Done ${fmtDate(w.completedAt, tz)}` : `Due ${fmtDate(w.dueDate, tz)}`}</Td>
+                  <Td className="text-xs">{fmtMoney(woCost(w).total, org)}</Td>
+                </tr>
+              ))}
+            </Table>
+          </Card>
         </div>
       )}
 
