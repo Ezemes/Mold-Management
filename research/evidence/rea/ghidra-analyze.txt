@@ -1,0 +1,103 @@
+evidence_id: ev_d2a6690ebdfa2c9873f272f0736cf2fb964efaff253fd69b48958fb8caae709e
+subject:
+  name: true.bin
+  digest:
+    sha256: 8a63c98320173f79e263115e10cefc170155e47d1fd4b5a70e4429d2699cae28
+  local_path: /tmp/claude-0/-home-user/71f98381-58fb-5564-a90a-8444680b5095/scratchpad/true.bin
+  format: elf
+  architecture: x86_64
+provider:
+  id: rea-workflow
+  name: REA composed investigation workflow
+  version: "1"
+analysis_profile:
+  provider:
+    id: rea-workflow
+    name: REA composed investigation workflow
+    version: "1"
+  parameters:
+    upstream_analysis_profile:
+      provider:
+        id: ghidra
+        name: Ghidra
+        version: 12.1.4
+      parameters:
+        target_kind: executable
+        target_format: elf
+        architecture: x86_64
+        available_architectures[1]: x86_64
+        import_mode: ephemeral-source-immutable
+        annotation_policy: atomic-function-entry-metadata-v1
+        load_image_observations: source-mappings-entry-context-v2
+        function_body_evidence: complete-inclusive-ranges-v1
+        function_references: complete-body-and-entry-reference-manager-v2
+        call_relationship_coverage: function-body-call-coverage-v5
+        function_dossier_coverage: observed-facets-and-call-relationships-v1
+        string_inventory_evidence: defined-data-coverage-v1
+        location_resolution: explicit-address-exact-entry-symbol-first-v3
+        procedure_file_offset_resolution: address-first-unique-target-source-mapping-v2
+        instruction_flow_evidence: decoded-return-pcode-v1
+        instruction_references: exact-address-incoming-without-synthetic-entry-v2
+        function_boundary_observations: ghidra-function-boundary-limitations-v4
+        no_return_repair: returning-imports-decoded-return-v2
+        process_launch: inspected-jvm-launch-support-v1
+        jump_table_evidence: typed-case-default-blocks-v1
+        decompiler_jump_loads: true
+        loader: auto-from-header
+        language_id: auto-from-header
+        compiler_spec_id: auto-default
+        analyzer_preset: ghidra-default
+      digest: 769518a8e9b57f953dd241adbb63672f0f486bb3d66359b9deef7c5e088ca7aa
+    source_limitations: provider-operation-caveats-v1
+    workflow_revision: 4
+  digest: 8df2cbc944b295f6450179ed68f12860b8f004213764ef4d971a9b8622d65d45
+predicate_type: rea.analysis
+operation: binary_overview
+parameters:
+raw_result: null
+normalized_result:
+  document: target-8a63c9832017.bin
+  image_base: 0x100000
+  segments[32]{name,start,end,length,image_base,address_space}:
+    segment_2.1,0x100000,0x100318,792,0x100000,ram
+    .interp,0x100318,0x100334,28,0x100000,ram
+    .note.gnu.property,0x100338,0x100368,48,0x100000,ram
+    .note.gnu.build-id,0x100368,0x10038c,36,0x100000,ram
+    .note.ABI-tag,0x10038c,0x1003ac,32,0x100000,ram
+    .gnu.hash,0x1003b0,0x1003d4,36,0x100000,ram
+    .dynsym,0x1003d8,0x100828,1104,0x100000,ram
+    .dynstr,0x100828,0x100a86,606,0x100000,ram
+    .gnu.version,0x100a86,0x100ae2,92,0x100000,ram
+    .gnu.version_r,0x100ae8,0x100b58,112,0x100000,ram
+    .rela.dyn,0x100b58,0x100c78,288,0x100000,ram
+    .rela.plt,0x100c78,0x100fa8,816,0x100000,ram
+    .init,0x101000,0x10101b,27,0x100000,ram
+    .plt,0x101020,0x101250,560,0x100000,ram
+    .plt.got,0x101250,0x101260,16,0x100000,ram
+    .plt.sec,0x101260,0x101480,544,0x100000,ram
+    .text,0x101480,0x103ea2,10786,0x100000,ram
+    .fini,0x103ea4,0x103eb1,13,0x100000,ram
+    .rodata,0x104000,0x1049cb,2507,0x100000,ram
+    .eh_frame_hdr,0x1049cc,0x104a58,140,0x100000,ram
+    .eh_frame,0x104a58,0x104ca8,592,0x100000,ram
+    .init_array,0x105c90,0x105c98,8,0x100000,ram
+    .fini_array,0x105c98,0x105ca0,8,0x100000,ram
+    .dynamic,0x105ca0,0x105e90,496,0x100000,ram
+    .got,0x105e90,0x106000,368,0x100000,ram
+    .data,0x106000,0x106014,20,0x100000,ram
+    .bss,0x106018,0x106028,16,0x100000,ram
+    EXTERNAL,0x107000,0x107168,360,0x100000,ram
+    .gnu_debugaltlink,".gnu_debugaltlink:0x0",".gnu_debugaltlink:0x49",73,0x100000,.gnu_debugaltlink
+    .gnu_debuglink,".gnu_debuglink:0x0",".gnu_debuglink:0x34",52,0x100000,.gnu_debuglink
+    .shstrtab,".shstrtab:0x0",".shstrtab:0x122",290,0x100000,.shstrtab
+    _elfSectionHeaders,"_elfSectionHeaders:0x0","_elfSectionHeaders:0x780",1920,0x100000,_elfSectionHeaders
+  segment_count: 32
+  procedure_count: 133
+  string_count: 122
+confidence: derived
+authority: shipped-artifact
+environment: null
+limitations[8]: Derived by an REA composed workflow.,"Ghidra (ghidra 12.1.4) read_binary_inventory_summary: Cancelling an active Ghidra request terminates its ephemeral database and discards session annotations. The selected target remains open; the next provider query imports the original artifact again.","Ghidra (ghidra 12.1.4) read_binary_inventory_summary: Counts use the complete defined-string inventory and the same local/external function inventory as list_strings and list_procedures. They do not establish discovery of undefined strings or unidentified functions.","Ghidra (ghidra 12.1.4) read_binary_inventory_summary: Default-space addresses use lowercase 0x-prefixed hexadecimal; other address spaces use <percent-encoded-space>:0x<hex>.","Ghidra (ghidra 12.1.4) read_binary_inventory_summary: Memory-block end addresses are exclusive; segment lengths use those observed address coordinates.","Ghidra (ghidra 12.1.4) read_binary_inventory_summary: Only Ghidra-defined string Data is observed; packed or undefined string bytes may be absent. Completeness applies to that inventory, and an empty search does not establish that text is absent from the artifact. If an address is known, use read_bytes and xrefs to inspect bytes and references.","Ghidra (ghidra 12.1.4) read_binary_inventory_summary: The imported Program and temporary project are ephemeral and deleted on close. Annotation operations edit session database metadata; original executable bytes are never written.","Ghidra (ghidra 12.1.4) read_binary_inventory_summary: The session serves operations only after Ghidra reports default auto-analysis complete; incomplete analysis does not expose partial results."
+relationship_coverage: null
+locations: []
+evidence_links: []
