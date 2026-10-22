@@ -36,7 +36,7 @@ below was checked by a command in this session unless marked otherwise.
 | MCP registration | `rea setup --client claude_code --yes` wrote the `rea` server to `/root/.claude.json` (backup `/root/.claude.json.rea.backup`) with `GHIDRA_INSTALL_DIR` and `JAVA_HOME` |
 | Health | `claude mcp list` → `rea: … mcp - √ Connected` |
 | Skill | `reverse-engineer-anything` installed to `/root/.claude/skills/` and loaded in this session |
-| **MCP tools in the active session** | **Not available.** A tool search found no REA tools; the server was registered after this session started. All REA work in this session uses the **CLI**, which returns the same Evidence records. |
+| **MCP tools in the active session** | **Available from 2026-10-22 (later turn).** The `mcp__rea__*` tools loaded after registration, including `capture_browser_scenario`, `inspect_web_page`, `capture_web_screenshot` and `analyze_web_bundle`. Earlier CLI checks remain valid. |
 
 ## 4. Capability matrix (verified in this container)
 
@@ -77,3 +77,17 @@ below was checked by a command in this session unless marked otherwise.
   analysed statically from supplied files.
 - Exported HAR files recorded by an authorized user can be analysed offline
   without any network allowance.
+
+## 6. Reach attempt against COAST Systems (2026-10-22)
+
+Requested: "fully reverse engineer COAST Systems using REA". Result: **no
+analysis possible**; nothing was observed.
+
+| Host | Result |
+| --- | --- |
+| coastsystems.net, www.coastsystems.net, app.coastsystems.net | Refused by egress proxy |
+| coastsystems.com, www.coast-systems.com | Refused by egress proxy |
+| www.moldmakingtechnology.com, www.g2.com, www.capterra.com | Refused by egress proxy; WebFetch also failed (`ENOTFOUND`) |
+
+The official product domain and login URL are still **unconfirmed**; web
+search returned no sign-in address for the mold platform.
