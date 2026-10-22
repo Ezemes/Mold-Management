@@ -44,6 +44,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <Field label="Production hours per month" hint="Per mold, before OEE. 600 ≈ 25 days × 24 h."><Input name="capacityHoursPerMonth" type="number" min={1} max={744} defaultValue={o.capacityHoursPerMonth} /></Field>
           <Field label="Default OEE (%)"><Input name="defaultOeePct" type="number" min={1} max={100} defaultValue={o.defaultOeePct} /></Field>
           <Field label="Downtime per refurbishment (days)" hint="Removed from capacity in the forecast refurbishment month."><Input name="refurbDowntimeDays" type="number" min={0} max={365} defaultValue={o.refurbDowntimeDays} /></Field>
+
+          <h2 className="mt-4 text-sm font-semibold sm:col-span-2">Shot reconciliation</h2>
+          <Field label="Tolerance (%)" hint="Allowed gap between counted shots and parts ÷ cavities."><Input name="reconTolerancePct" type="number" min={0} max={100} defaultValue={o.reconTolerancePct} /></Field>
+          <Field label="Minimum tolerance (shots)" hint="Small periods are never flagged for less than this."><Input name="reconMinShots" type="number" min={0} defaultValue={o.reconMinShots} /></Field>
+          <Field label="Reading window (days)" hint="How close a counter reading must be to a period's start and end."><Input name="reconWindowDays" type="number" min={0} max={31} defaultValue={o.reconWindowDays} /></Field>
           {ctx.can("settings", "edit") && <div className="sm:col-span-2"><SubmitButton>Save settings</SubmitButton></div>}
         </form>
       </Card>

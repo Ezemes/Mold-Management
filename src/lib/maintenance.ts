@@ -3,6 +3,8 @@ import type { Prisma } from "@prisma/client";
 import { db } from "./db";
 import { audit } from "./audit";
 import { notify, recipientsFor } from "./notify";
+import { emitEvent } from "./webhooks";
+import { reconcileReports } from "./reconcile";
 import { nextWorkOrderNumber } from "./work-orders";
 import { planState, OPEN_WO, type TaskDef, type TaskResult } from "./maintenance.pure";
 
@@ -47,6 +49,7 @@ export async function evaluatePlans(orgId: string, assetIds?: string[], now = ne
         return wo;
       });
       raised++;
+      await emitEvent(orgId, "threshold.crossed", { kind: "maintenance_due", asset: p.asset.number, plan: p.template.name, trigger: `${p.interval} ${st.unit}`, lifetime_shots: shots, work_order: wo.number }, { dedupeKey: `pm-due:${wo.id}` });
       await notify(orgId, await who(), { kind: "pm_due", title: `${p.template.name} due: ${p.asset.number}`, body: `${wo.number} raised. ${st.unit === "shots" ? `Due at ${st.dueAtShots?.toLocaleString("en-IN")} shots (now ${shots?.toLocaleString("en-IN")}).` : `Due ${st.dueDate?.toISOString().slice(0, 10)}.`}`, link: `/maintenance/work-orders/${wo.id}`, dedupeKey: `pm-due:${wo.id}` });
     } else if (st.status === "due_soon" && (!p.warnedAt || p.warnedAt < p.baselineDate)) {
       await db.maintenancePlan.update({ where: { id: p.id }, data: { warnedAt: now } });
@@ -68,6 +71,7 @@ export async function lifeAlerts(orgId: string, assetId: string) {
       if (shots >= (limit * pct) / 100) {
         const users = await recipientsFor(orgId, "assets", "edit", { siteId: a.siteId });
         await notify(orgId, users, { kind: "life_threshold", title: `${a.number} reached ${pct}% of ${name} shots`, body: `${shots.toLocaleString("en-IN")} of ${limit.toLocaleString("en-IN")} shots.`, link: `/assets/${a.id}`, dedupeKey: `life:${a.id}:${name}:${pct}` });
+        await emitEvent(orgId, "threshold.crossed", { kind: name === "warranty" ? "warranty_shots" : "end_of_life_shots", pct, asset: a.number, lifetime_shots: shots, limit_shots: limit }, { dedupeKey: `life:${a.id}:${name}:${pct}` });
         break;
       }
     }
@@ -87,6 +91,8 @@ export async function afterReadings(orgId: string, assetIds: string[]) {
   try {
     await evaluatePlans(orgId, assetIds);
     for (const id of assetIds.slice(0, 500)) await lifeAlerts(orgId, id);
+    // New readings may complete the counter span a waiting production report needs.
+    await reconcileReports(orgId, { assetIds });
   } catch (e) {
     console.error("afterReadings failed", e);
   }
@@ -108,4 +114,16 @@ export async function raiseQuarantineWorkOrder(tx: Prisma.TransactionClient, ctx
   });
   await audit({ orgId: ctx.org.id, userId: ctx.user.id }, { action: "created", entityType: "work_order", entityId: wo.id, entityLabel: number, after: { asset: a.number, from: "quarantine" }, reason }, tx);
   return wo;
+}
+
+/** Emit work_order.closed once the completion or cancellation has committed. */
+export async function emitWorkOrderClosed(id: string) {
+  const wo = await db.workOrder.findUnique({ where: { id }, include: { asset: { select: { number: true } }, labor: true, parts: true } });
+  if (!wo || (wo.status !== "completed" && wo.status !== "cancelled")) return;
+  const cost = woCost(wo);
+  await emitEvent(wo.orgId, "work_order.closed", {
+    work_order: wo.number, status: wo.status, type: wo.type, title: wo.title, asset: wo.asset.number, source: wo.source,
+    completed_at: wo.completedAt?.toISOString() ?? null, signed_by: wo.signedByName || null, shots_at_completion: wo.shotsAtCompletion, pass_pct: wo.passPct,
+    cancel_reason: wo.cancelReason || null, cost: { labor: cost.labor, parts: cost.parts, external: cost.external, total: cost.total, hours: cost.hours },
+  }, { dedupeKey: `wo-closed:${wo.id}` });
 }

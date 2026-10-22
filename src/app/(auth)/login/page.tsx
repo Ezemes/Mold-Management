@@ -18,6 +18,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <Field label="Password" name="password"><Input name="password" type="password" required autoComplete="current-password" /></Field>
         <SubmitButton className="w-full" pendingText="Signing in…">Sign in</SubmitButton>
       </form>
+      <Link href={`/login/sso${sp.next ? `?next=${encodeURIComponent(sp.next)}` : ""}`} className="mt-3 block rounded-md border border-gray-300 bg-white px-3.5 py-2 text-center text-sm font-medium text-ink-900 hover:bg-gray-50">Sign in with single sign-on</Link>
       <div className="mt-6 flex justify-between text-sm">
         <Link href="/forgot-password" className="text-brand-700 hover:underline">Forgot password?</Link>
         <Link href="/register" className="text-brand-700 hover:underline">Register your organisation</Link>

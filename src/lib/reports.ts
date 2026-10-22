@@ -20,6 +20,7 @@ export const REPORTS = {
   maintenance_cost: { title: "Maintenance cost per mold", description: "Completed work in the last 12 months: cost, shots run and cost per 1,000 shots." },
   budget: { title: "Budget vs actual", description: "This year's budget against completed work-order spend, by category." },
   transit: { title: "Transfers and transit time", description: "Completed transfers in the last 12 months and average days in transit, by route." },
+  reconciliation: { title: "Reconciliation exceptions", description: "Production reports whose parts ÷ cavities disagree with the shot counter beyond tolerance." },
   data_quality: { title: "Data quality", description: "Mold passports missing fields needed for life tracking, planning and press compatibility." },
 } as const;
 export type ReportKey = keyof typeof REPORTS;
@@ -110,6 +111,12 @@ export async function buildReport(ctx: Ctx, key: ReportKey, now = new Date()): P
       }
       const rows = [...routes.entries()].map(([k, r]) => [k, r.n, r.molds, r.days.length ? Math.round((r.days.reduce((a, b) => a + b, 0) / r.days.length) * 10) / 10 : null, r.open]);
       return { ...meta, columns: ["Route", "Transfers received", "Molds moved", "Average days in transit", "In transit now"], rows, numeric: [1, 2, 3, 4] };
+    }
+    case "reconciliation": {
+      const xs = await db.reconciliationException.findMany({ where: { orgId: ctx.org.id, asset: scope }, include: { asset: { select: { number: true } }, report: true }, orderBy: [{ status: "asc" }, { createdAt: "desc" }], take: 5000 });
+      const d = (x: Date) => x.toISOString().slice(0, 10);
+      const rows = xs.map((x) => [x.asset.number, d(x.report.periodStart), d(new Date(x.report.periodEnd.getTime() - 1)), x.report.partNumber || "", x.report.parts, x.expectedShots, x.recordedShots, x.gap, x.gapPct, x.status, x.resolution]);
+      return { ...meta, description: `${meta.description} ${xs.filter((x) => x.status === "open").length} open.`, columns: ["Mold", "From", "To", "Part", "Parts", "Expected shots", "Counted shots", "Gap", "Gap %", "Status", "Resolution"], rows, numeric: [4, 5, 6, 7, 8] };
     }
     case "data_quality": {
       const molds = await db.asset.findMany({ where: { AND: [scope, { assetType: { kind: "mold" }, parentId: null, status: { notIn: ["retired", "scrapped"] } }] }, include: { meters: true, products: { select: { id: true } } }, orderBy: { number: "asc" } });

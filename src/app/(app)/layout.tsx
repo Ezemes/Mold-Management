@@ -22,6 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             { href: "/assets", label: "Assets" },
             ...(ctx.can("transfers") ? [{ href: "/transfers", label: "Transfers", badge: actionCount }] : []),
             ...(ctx.can("maintenance") ? [{ href: "/maintenance", label: "Maintenance", badge: maintCount }] : []),
+            ...(ctx.can("readings") ? [{ href: "/reconciliation", label: "Reconciliation" }] : []),
             { href: "/presses", label: "Presses" },
             ...(ctx.can("quality") ? [{ href: "/quality", label: "Quality" }] : []),
             ...(ctx.can("inventory") ? [{ href: "/inventory", label: "Spare parts" }] : []),
@@ -48,6 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             ...(ctx.can("roles") ? [{ href: "/admin/roles", label: "Roles" }] : []),
             ...(ctx.can("audit") ? [{ href: "/admin/audit", label: "Audit log" }] : []),
             ...(ctx.can("settings") ? [{ href: "/admin/settings", label: "Settings" }] : []),
+            ...(ctx.can("integrations") ? [{ href: "/admin/integrations", label: "Integrations" }] : []),
           ],
         },
       ].filter((g) => g.items.length);

@@ -2,7 +2,7 @@
 
 System of record for injection molds across your plants and supplier network: where each mold is, who has custody, how many shots it has run, its condition, and its full history. General plant equipment uses the same asset model.
 
-**Status:** Phases 3a (Foundation), 3b (Transfers, Maintenance, Supplier workflow) and 3c (Engineering & planning) are built and pass their acceptance suites. The approved specification is `docs/PHASE2_PRODUCT_SPEC.md`. Background research is in `research/`.
+**Status:** Phases 3a (Foundation), 3b (Operations), 3c (Engineering & planning) and 3d (Connectivity) are built and pass their acceptance suites. The approved specification is `docs/PHASE2_PRODUCT_SPEC.md`. Background research is in `research/`.
 
 ## What Phase 3a includes
 
@@ -103,7 +103,37 @@ System of record for injection molds across your plants and supplier network: wh
   - transfer routes and average transit days
   - passport data quality with a fleet completeness score
 
-Not yet built, planned per the spec: public API, webhooks, shot reconciliation and SSO (3d); downtime events (§4.9).
+## What Phase 3d adds
+
+- **Public REST API** (`/api/v1`, reference at **/developers**, OpenAPI at `/api/v1/openapi.json`):
+  - **Reading:** assets with passport summary, shot readings, transfers with handover counts, work orders with costs, sites, partners, reconciliation exceptions, and an event log for polling.
+  - **Writing:**
+    - **Shot readings:** batches of up to 1,000, accepted or rejected per item. Re-sending the same reading is reported as a duplicate, so retries are safe. Triggers, life alerts and reconciliation run afterwards.
+    - **Production quantities:** used for shot reconciliation.
+  - **API keys** are created under Admin → Integrations.
+    - Each key has scopes, an optional restriction to certain sites, and an optional expiry. The token is shown once and only its SHA-256 hash is stored.
+    - Keys are rate-limited to 600 requests per minute, and every write is audited with the key's name.
+- **Webhooks:**
+  - Events: `transfer.status_changed`, `work_order.closed`, `threshold.crossed` (80/95% of warranty or end-of-life shots; maintenance due) and `reconciliation.exception`.
+  - Events go through an outbox and are deduplicated.
+  - Every delivery is signed with HMAC-SHA256 (`X-PM-Signature: t=…,v1=…`) using a per-endpoint secret, which is encrypted at rest.
+  - Failed deliveries are retried after 1 min, 5 min, 30 min, 2 h, 8 h and 24 h. An endpoint is switched off after 20 failures in a row.
+  - Webhooks go to https URLs only and redirects aren't followed. The destination is checked again when connecting, so DNS changes can't redirect a delivery to an internal address.
+  - The admin screen offers a test ping, the delivery history, a retry button and secret rotation.
+- **Shot reconciliation:**
+  - Production reports arrive from the API or a CSV import. Each is compared with the counter: parts ÷ cavities (per part for family molds) against counted shots.
+  - The counter readings used are the ones closest to the period's start and end, within a set window.
+  - A gap beyond the tolerance (default 5%, at least 200 shots) raises an exception, an alert and a webhook. Exceptions are accepted with an explanation or marked as corrected, and both are audited.
+  - Reports still waiting for readings are rechecked whenever new readings arrive and by the daily job.
+- **Single sign-on:**
+  - **Protocols:** OpenID Connect (authorization code with PKCE; the ID token's signature, issuer, audience and nonce are verified) and SAML 2.0 (signed assertions, checked by `@node-saml/node-saml`).
+  - **Signing in:** users enter their work email at **/login/sso** and are sent to their organisation's identity provider. Groups map to a role and a scope (all, sites, divisions or a supplier partner). The first matching group wins, and access is refreshed at every sign-in. Accounts can be created on first sign-in.
+  - **Domain proof:** a domain must be verified with a DNS TXT record before anyone can sign in with it. This stops an organisation claiming addresses it doesn't own.
+  - **Required SSO:** a connection can require SSO for its domains; org admins keep password sign-in as a break-glass.
+  - **One-time state:** each sign-in is single-use and tied to the browser that started it, which protects against replay and login CSRF.
+- **Security update:** Next.js went from 15.5.4 to 15.5.28, which fixes a critical remote-code-execution advisory.
+
+Not yet built: downtime events (§4.9); Phase 4 (native app, ERP/BI connectors, sensors, AI).
 
 ## Stack
 
@@ -133,11 +163,14 @@ To start without demo data, register at `/register`; you become the organisation
 ## Tests
 
 ```bash
-npm test             # unit tests (33): formulas, shot counters, CSV import, transfers, maintenance, compatibility, quality, stock, planning
+npm test             # unit tests (39): formulas, shot counters, CSV import, transfers, maintenance, compatibility, quality, stock, planning
 npm run test:e2e     # Phase 3a browser acceptance suite (31 checks) against a running app
 npm run test:e2e:3b  # Phase 3b suite (36 checks): transfers, disputes, triggers, work orders, quarantine, supplier
 npm run test:e2e:3c  # Phase 3c suite (34 checks): compatibility, qualification, evaluations, stock, planning, reports
+npm run test:e2e:3d  # Phase 3d suite (49 checks): API, webhooks, reconciliation, OIDC and SAML sign-in
 ```
+
+The 3d suite runs its own mock OIDC and SAML identity providers (ports 4455/4456) and a webhook receiver (4466). Start the app for it with `APP_URL=http://localhost:3000 WEBHOOK_ALLOW_HTTP=1 WEBHOOK_ALLOW_PRIVATE=1 SSO_SKIP_DOMAIN_VERIFICATION=1`. These three settings are for tests only and must not be set in production.
 
 Reset the test database before each suite with `e2e/reset-db.sh <DATABASE_URL>` (drops, migrates and seeds it), then restart the app so it opens fresh connections. The 3b suite also needs `CRON_SECRET` set to the same value as the app.
 
@@ -150,6 +183,10 @@ The e2e suite needs a **fresh** seeded database, `DATABASE_URL` pointing at it, 
 - `src/lib/mail.ts` logs emails to the server console. Plug in a provider before launch; verification codes and reset links show on screen only in development.
 - Set `APP_URL` to the public URL; it is printed into QR tags and emailed links.
 - Set `CRON_SECRET` (16+ characters) and schedule a daily `POST /api/cron/daily` (e.g. 06:00 IST). Running it more than once a day is harmless.
+- Also schedule `POST /api/cron/webhooks` (same bearer token) every minute; it retries failed webhook deliveries.
+- Serve the app over https. SSO state cookies are `Secure; SameSite=None` because SAML posts back cross-site.
+- The API rate limit is per app process; behind several instances, add a limit at the load balancer too.
+- Secrets at rest (webhook secrets, OIDC client secrets) are encrypted with a key derived from `DATA_KEY`, or from `AUTH_SECRET` if `DATA_KEY` isn't set. Rotating that key makes the stored secrets unreadable, so re-enter them afterwards.
 
 ## Code map
 
@@ -172,6 +209,13 @@ src/lib/quality*.ts           Weighted condition scores, IQ/OQ/PQ stage rules, r
 src/lib/inventory*.ts         Stock rules (pure) and the atomic stock move
 src/lib/planning*.ts          Shot rate, life forecast, budget rules, capacity (pure) and fleet queries
 src/lib/reports.ts            Standard reports (shared by the pages and CSV export)
+src/lib/api*.ts               API keys, auth, scopes, rate limit, paging; JSON shapes
+src/lib/openapi.ts            OpenAPI document (also renders /developers)
+src/lib/ingest.ts             Readings and production ingestion shared by the API and CSV
+src/lib/webhooks*.ts          Event outbox, signing, retries, private-address guard
+src/lib/reconcile*.ts         Shot reconciliation (pure) and exception handling
+src/lib/sso*.ts               OIDC and SAML sign-in, domain verification, group mapping
+src/lib/crypto.ts             AES-256-GCM for secrets at rest, hashing, tokens
 src/app/(auth)/               Register, verify email, login, reset password, accept invite
 src/app/(app)/assets/         Asset list, passport, create/edit, QR tag
 src/app/(app)/admin/          Sites, partners, asset types, users, roles, audit, settings
@@ -184,6 +228,11 @@ src/app/(app)/quality/        Condition evaluations, qualifications, criteria
 src/app/(app)/inventory/      Parts, stock by site, ledger, reorder list
 src/app/(app)/planning/       Life forecast, capacity plan, budget
 src/app/(app)/reports/        Standard reports
-src/app/api/cron/daily/       Daily job endpoint
+src/app/(app)/reconciliation/ Exceptions, production reports, CSV import
+src/app/(app)/admin/integrations/  API keys, webhooks, single sign-on
+src/app/api/v1/               Public REST API
+src/app/api/sso/              SSO start, OIDC callback, SAML ACS and metadata
+src/app/developers/           Public API and webhook reference
+src/app/api/cron/             Daily job and webhook retry endpoints
 e2e/                          Browser acceptance suite
 ```

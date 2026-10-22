@@ -7,7 +7,7 @@ export async function start() {
   const page = await ctx.newPage();
   const errors = [];
   page.on('dialog', d => d.accept());
-  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  page.on('pageerror', e => errors.push(`pageerror at ${page.url()}: ${e.message}`));
   page.on('console', m => { if (m.type() === 'error' && !/caret-color|hydrated but some attributes/.test(m.text())) errors.push('console: ' + m.text().slice(0, 300)); });
   page.on('response', r => { if (r.status() >= 500) errors.push(`HTTP ${r.status()} ${r.url()}`); });
   return { browser, ctx, page, errors };

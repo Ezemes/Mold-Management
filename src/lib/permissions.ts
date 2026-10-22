@@ -17,6 +17,7 @@ export const MODULES = {
   audit: "Audit log",
   import_export: "Import & export",
   settings: "Organisation settings",
+  integrations: "API keys, webhooks & SSO",
 } as const;
 export type Module = keyof typeof MODULES;
 

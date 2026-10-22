@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { passwordBlockedBySso } from "@/lib/sso";
 import { db } from "@/lib/db";
 import { createSession, destroySession, hashPassword, PASSWORD_RULE, requireUser, validPassword, verifyPassword } from "@/lib/auth";
 import { audit } from "@/lib/audit";
@@ -63,6 +64,7 @@ export async function loginAction(fd: FormData) {
   const user = await db.user.findUnique({ where: { email } });
   if (!user || !(await verifyPassword(str(fd, "password"), user.passwordHash))) fail("/login", "Incorrect email or password.");
   if (user.status !== "active") fail("/login", "This account is suspended. Contact your administrator.");
+  if (await passwordBlockedBySso(user.id, email)) fail("/login", "Your organisation signs in with single sign-on. Use “Sign in with single sign-on” below.");
   if (!user.emailVerifiedAt) {
     await issueOtp(user.id, email);
     redirect(`/verify-email?email=${encodeURIComponent(email)}`);

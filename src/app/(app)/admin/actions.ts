@@ -230,7 +230,7 @@ export async function saveRoleAction(fd: FormData) {
     if (acts.length) perms[m] = acts;
   }
   const isSupplier = str(fd, "isSupplier") === "1";
-  if (isSupplier) for (const m of ["users", "roles", "settings", "audit", "asset_types", "sites", "partners", "import_export", "inventory", "planning", "reports"]) delete perms[m];
+  if (isSupplier) for (const m of ["users", "roles", "settings", "audit", "asset_types", "sites", "partners", "import_export", "inventory", "planning", "reports", "integrations"]) delete perms[m];
   // Approving transfers or work orders is an internal decision.
   if (isSupplier) for (const m of Object.keys(perms)) perms[m] = perms[m].filter((a) => a !== "approve");
   const permissions = normalizePermissions(perms) as Prisma.InputJsonValue;
@@ -278,6 +278,9 @@ export async function saveSettingsAction(fd: FormData) {
     capacityHoursPerMonth: Math.min(744, Math.max(1, int(fd, "capacityHoursPerMonth") || 600)),
     defaultOeePct: Math.min(100, Math.max(1, int(fd, "defaultOeePct") || 75)),
     refurbDowntimeDays: Math.min(365, Math.max(0, int(fd, "refurbDowntimeDays"))),
+    reconTolerancePct: Math.min(100, Math.max(0, int(fd, "reconTolerancePct"))),
+    reconMinShots: Math.min(1_000_000, Math.max(0, int(fd, "reconMinShots"))),
+    reconWindowDays: Math.min(31, Math.max(0, int(fd, "reconWindowDays"))),
     compatRules: normalizeRules({
       enabled: Object.fromEntries(Object.keys(RULES).map((k) => [k, str(fd, `rule.${k}`) === "on"])),
       tonnageMarginPct: Number(str(fd, "tonnageMarginPct")),

@@ -2,16 +2,18 @@ import "server-only";
 import { db } from "./db";
 import { notify, recipientsFor, emailPending } from "./notify";
 import { evaluatePlans, OPEN_WO } from "./maintenance";
+import { reconcileReports } from "./reconcile";
+import { dispatchDue } from "./webhooks";
 
 const DAY = 86_400_000;
 
 /**
  * The daily job (spec §4.4–4.6): calendar and shot triggers, overdue readings, overdue work orders,
- * late transfers and condition evaluations due. Every alert is deduped, so running it twice in a day is harmless.
+ * late transfers, condition evaluations due, pending shot reconciliation and webhook retries. Every alert is deduped, so running it twice in a day is harmless.
  */
 export async function runDaily(now = new Date()) {
   const orgs = await db.organisation.findMany({ select: { id: true, readingOverdueDays: true } });
-  const out = { orgs: orgs.length, raised: 0, warned: 0, readingAlerts: 0, woAlerts: 0, transferAlerts: 0, evaluationAlerts: 0 };
+  const out = { orgs: orgs.length, raised: 0, warned: 0, readingAlerts: 0, woAlerts: 0, transferAlerts: 0, evaluationAlerts: 0, reconChecked: 0, reconExceptions: 0, webhooksSent: 0 };
   const week = Math.floor(now.getTime() / (7 * DAY));
   for (const org of orgs) {
     const r = await evaluatePlans(org.id, undefined, now);
@@ -50,7 +52,15 @@ export async function runDaily(now = new Date()) {
       const users = await recipientsFor(org.id, "quality", "create", { siteId: a.siteId, partnerIds: [a.custodianPartnerId] });
       out.evaluationAlerts += await notify(org.id, users, { kind: "evaluation_due", title: `Condition evaluation due: ${a.number}`, body: `${a.name} was due for evaluation on ${a.nextEvaluationDate!.toISOString().slice(0, 10)}.`, link: `/quality/evaluations/new?asset=${a.id}`, dedupeKey: `eval-due:${a.id}:${a.nextEvaluationDate!.toISOString().slice(0, 10)}` });
     }
+
+    // Production reports still waiting for counter readings.
+    const rc = await reconcileReports(org.id);
+    out.reconChecked += rc.checked;
+    out.reconExceptions += rc.exceptions;
   }
+  out.webhooksSent = (await dispatchDue(500)).sent;
+  // Event log and delivery history are kept for 90 days.
+  await db.outboundEvent.deleteMany({ where: { createdAt: { lt: new Date(now.getTime() - 90 * DAY) } } });
   await emailPending();
   return out;
 }

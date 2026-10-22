@@ -14,13 +14,15 @@
     "postinstall": "prisma generate",
     "test:e2e": "node e2e/acceptance.mjs",
     "test:e2e:3b": "node e2e/phase3b.mjs",
-    "test:e2e:3c": "node e2e/phase3c.mjs"
+    "test:e2e:3c": "node e2e/phase3c.mjs",
+    "test:e2e:3d": "node e2e/phase3d.mjs"
   },
   "dependencies": {
+    "@node-saml/node-saml": "^5.1.0",
     "@prisma/client": "^6.16.2",
     "bcryptjs": "^3.0.2",
     "jose": "^6.1.0",
-    "next": "15.5.4",
+    "next": "15.5.28",
     "papaparse": "^5.5.3",
     "qrcode": "^1.5.4",
     "react": "19.1.0",
@@ -36,7 +38,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.5.4",
+    "eslint-config-next": "15.5.28",
     "playwright-core": "1.56.1",
     "prisma": "^6.16.2",
     "tailwindcss": "^4",

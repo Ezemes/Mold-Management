@@ -31,33 +31,44 @@ model Organisation {
   capacityHoursPerMonth Int      @default(600)
   defaultOeePct         Int      @default(75)
   refurbDowntimeDays    Int      @default(14)
+  /// Shot reconciliation: allowed gap between counter and production-implied shots
+  reconTolerancePct     Int      @default(5)
+  reconMinShots         Int      @default(200)
+  /// How close (days) a counter reading must be to a production period's start and end
+  reconWindowDays       Int      @default(3)
   status                String   @default("active") // active | suspended
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  divisions      Division[]
-  sites          Site[]
-  partners       Partner[]
-  memberships    Membership[]
-  roles          Role[]
-  invites        Invite[]
-  assetTypes     AssetType[]
-  assets         Asset[]
-  audit          AuditEvent[]
-  imports        ImportJob[]
-  transfers      Transfer[]
-  templates      MaintenanceTemplate[]
-  plans          MaintenancePlan[]
-  workOrders     WorkOrder[]
-  notifications  Notification[]
-  attachments    Attachment[]
-  moldPresses    MoldPress[]
-  evaluations    ConditionEvaluation[]
-  qualifications Qualification[]
-  parts          Part[]
-  stockMoves     StockMove[]
-  budgetItems    BudgetItem[]
-  demand         ProductDemand[]
+  divisions       Division[]
+  sites           Site[]
+  partners        Partner[]
+  memberships     Membership[]
+  roles           Role[]
+  invites         Invite[]
+  assetTypes      AssetType[]
+  assets          Asset[]
+  audit           AuditEvent[]
+  imports         ImportJob[]
+  transfers       Transfer[]
+  templates       MaintenanceTemplate[]
+  plans           MaintenancePlan[]
+  workOrders      WorkOrder[]
+  notifications   Notification[]
+  attachments     Attachment[]
+  moldPresses     MoldPress[]
+  evaluations     ConditionEvaluation[]
+  qualifications  Qualification[]
+  parts           Part[]
+  stockMoves      StockMove[]
+  budgetItems     BudgetItem[]
+  demand          ProductDemand[]
+  apiKeys         ApiKey[]
+  webhooks        WebhookEndpoint[]
+  events          OutboundEvent[]
+  production      ProductionReport[]
+  reconExceptions ReconciliationException[]
+  ssoConnections  SsoConnection[]
 }
 
 model Division {
@@ -160,6 +171,7 @@ model User {
   notifications  Notification[]
   assignedWork   WorkOrder[]       @relation("WorkOrderAssignee")
   labor          WorkOrderLabor[]
+  ssoIdentities  SsoIdentity[]
 }
 
 /// A user's access to one organisation: one role plus a data scope.
@@ -387,20 +399,22 @@ model Asset {
   updatedAt             DateTime  @updatedAt
   deletedAt             DateTime?
 
-  cavities       Cavity[]
-  products       AssetProduct[]
-  meters         Meter[]
-  documents      Document[]
-  transferItems  TransferItem[]
-  plans          MaintenancePlan[]
-  workOrders     WorkOrder[]
-  pressesFor     MoldPress[]           @relation("MoldPressMold")
-  moldsFor       MoldPress[]           @relation("MoldPressPress")
-  evaluations    ConditionEvaluation[]
-  qualifications Qualification[]       @relation("QualMold")
-  qualifiedOn    Qualification[]       @relation("QualPress")
-  partLinks      PartAsset[]
-  budgetItems    BudgetItem[]
+  cavities        Cavity[]
+  products        AssetProduct[]
+  meters          Meter[]
+  documents       Document[]
+  transferItems   TransferItem[]
+  plans           MaintenancePlan[]
+  workOrders      WorkOrder[]
+  pressesFor      MoldPress[]               @relation("MoldPressMold")
+  moldsFor        MoldPress[]               @relation("MoldPressPress")
+  evaluations     ConditionEvaluation[]
+  qualifications  Qualification[]           @relation("QualMold")
+  qualifiedOn     Qualification[]           @relation("QualPress")
+  partLinks       PartAsset[]
+  budgetItems     BudgetItem[]
+  production      ProductionReport[]
+  reconExceptions ReconciliationException[]
 
   @@unique([orgId, number])
   @@index([orgId, siteId])
@@ -988,4 +1002,189 @@ model ProductDemand {
   updatedAt  DateTime     @updatedAt
 
   @@unique([orgId, partNumber, month])
+}
+
+// ─── Phase 3d: connectivity ─────────────────────────────────────────────────
+
+/// Organisation API key. The secret is shown once; only its SHA-256 is stored.
+model ApiKey {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name        String
+  /// Public part of the token (pmk_<prefix>_<secret>), used to look the key up
+  prefix      String       @unique
+  hash        String
+  scopes      String[]
+  /// Empty = all sites; otherwise the key only sees and writes assets at these sites
+  siteIds     String[]     @default([])
+  createdById String?
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime     @default(now())
+}
+
+model WebhookEndpoint {
+  id                  String       @id @default(cuid())
+  orgId               String
+  org                 Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  url                 String
+  description         String       @default("")
+  /// Signing secret, encrypted at rest
+  secretEnc           String
+  events              String[]
+  active              Boolean      @default(true)
+  consecutiveFailures Int          @default(0)
+  disabledReason      String       @default("")
+  createdById         String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  deliveries WebhookDelivery[]
+}
+
+/// Outbox of business events; one delivery per subscribed endpoint.
+model OutboundEvent {
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  type      String
+  data      Json
+  /// Stops the same threshold crossing being emitted twice
+  dedupeKey String?
+  createdAt DateTime     @default(now())
+
+  deliveries WebhookDelivery[]
+
+  @@unique([orgId, dedupeKey])
+  @@index([orgId, createdAt])
+}
+
+model WebhookDelivery {
+  id             String          @id @default(cuid())
+  eventId        String
+  event          OutboundEvent   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  endpointId     String
+  endpoint       WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  /// pending | delivered | failed
+  status         String          @default("pending")
+  attempts       Int             @default(0)
+  nextAttemptAt  DateTime        @default(now())
+  lastStatusCode Int?
+  lastError      String          @default("")
+  deliveredAt    DateTime?
+  createdAt      DateTime        @default(now())
+
+  @@index([status, nextAttemptAt])
+  @@index([endpointId, createdAt])
+}
+
+/// Parts produced by a mold over a period (from the API or CSV), checked against its shot counter.
+model ProductionReport {
+  id            String       @id @default(cuid())
+  orgId         String
+  org           Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assetId       String
+  asset         Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  periodStart   DateTime
+  periodEnd     DateTime
+  parts         Int
+  partNumber    String       @default("")
+  /// api | import
+  source        String       @default("import")
+  reference     String       @default("")
+  /// pending (waiting for readings) | matched | exception | unverifiable
+  status        String       @default("pending")
+  expectedShots Int?
+  recordedShots Int?
+  checkedAt     DateTime?
+  createdAt     DateTime     @default(now())
+
+  exception ReconciliationException?
+
+  @@unique([assetId, periodStart, periodEnd, partNumber])
+  @@index([orgId, status])
+}
+
+model ReconciliationException {
+  id            String           @id @default(cuid())
+  orgId         String
+  org           Organisation     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assetId       String
+  asset         Asset            @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  reportId      String           @unique
+  report        ProductionReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  expectedShots Int
+  recordedShots Int
+  /// recorded − expected
+  gap           Int
+  gapPct        Float
+  /// open | accepted (explained) | resolved (data corrected)
+  status        String           @default("open")
+  resolution    String           @default("")
+  resolvedById  String?
+  resolvedAt    DateTime?
+  createdAt     DateTime         @default(now())
+
+  @@index([orgId, status])
+}
+
+model SsoConnection {
+  id                  String       @id @default(cuid())
+  orgId               String
+  org                 Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name                String
+  /// oidc | saml
+  protocol            String
+  enabled             Boolean      @default(false)
+  /// Users with these email domains are offered (or required to use) this connection
+  emailDomains        String[]
+  /// Domains proven by DNS TXT record "_plant-metrics.<domain>" = "pm-verify=<verifyToken>". Only these are used.
+  verifiedDomains     String[]     @default([])
+  verifyToken         String       @default("")
+  /// Refuse password sign-in for these domains (org admins keep password access as a break-glass)
+  enforce             Boolean      @default(false)
+  /// Create users and memberships on first sign-in
+  jitProvisioning     Boolean      @default(true)
+  /// Role for users whose groups match no mapping (null = refuse sign-in)
+  defaultRoleId       String?
+  groupAttribute      String       @default("groups")
+  /// [{ group, roleId, scopeType, scopeIds, partnerId }] — first match wins
+  groupMappings       Json         @default("[]")
+  oidcIssuer          String       @default("")
+  oidcClientId        String       @default("")
+  oidcClientSecretEnc String       @default("")
+  samlEntryPoint      String       @default("")
+  samlIdpIssuer       String       @default("")
+  samlIdpCert         String       @default("")
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  identities SsoIdentity[]
+}
+
+/// Links an identity-provider subject to a user, so a changed email doesn't create a second account.
+model SsoIdentity {
+  id           String        @id @default(cuid())
+  connectionId String
+  connection   SsoConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  subject      String
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastLoginAt  DateTime      @default(now())
+
+  @@unique([connectionId, subject])
+}
+
+/// One-time state for an SSO sign-in in progress (OIDC state/nonce/PKCE, SAML request ID).
+model SsoState {
+  id           String   @id
+  connectionId String
+  nonce        String   @default("")
+  codeVerifier String   @default("")
+  requestId    String   @default("")
+  returnTo     String   @default("/dashboard")
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
 }

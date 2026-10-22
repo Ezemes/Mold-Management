@@ -13,6 +13,7 @@ import { flagRequalification } from "@/lib/quality";
 import { moveStock, parseQty, StockError } from "@/lib/inventory";
 import {
   checklistFromTemplate,
+  emitWorkOrderClosed,
   checklistSummary,
   evaluatePlans,
   nextWorkOrderNumber,
@@ -364,6 +365,7 @@ async function saveOrComplete(fd: FormData, complete: boolean) {
     await audit(ctx, { action: "created", entityType: "work_order", entityId: f.id, entityLabel: number, after: { asset: wo.asset.number, from: `failed checks on ${wo.number}` } }, tx);
     return f;
   });
+  await emitWorkOrderClosed(wo.id);
   if (follow) await notifyAssignee(ctx, follow, follow, wo.asset.siteId);
   if (wo.createdById && wo.createdById !== ctx.user.id) await notify(ctx.org.id, [wo.createdById], { kind: "wo_completed", title: `${wo.number} completed`, body: `${wo.title} on ${wo.asset.number}${summary.failed.length ? ` — ${summary.failed.length} failed check(s)` : ""}.`, link: path });
   back(follow ? `/maintenance/work-orders/${follow.id}` : path, follow ? `${wo.number} completed. Follow-up ${follow.number} raised for the failed checks.` : `${wo.number} completed and signed off.`, "ok");
@@ -468,5 +470,6 @@ export async function cancelWorkOrderAction(fd: FormData) {
       await tx.maintenancePlan.update({ where: { id: wo.planId }, data: { baselineShots: lifetime ?? wo.plan?.baselineShots ?? 0, baselineDate: new Date(), warnedAt: null } });
     }
   });
+  await emitWorkOrderClosed(wo.id);
   back(path, "Work order cancelled.", "ok");
 }

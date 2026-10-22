@@ -1,6 +1,7 @@
 import "server-only";
 import type { Prisma, Site } from "@prisma/client";
 import { db } from "./db";
+import { emitEvent } from "./webhooks";
 import type { Ctx } from "./auth";
 
 export * from "./transfers.pure";
@@ -41,4 +42,16 @@ export async function openTransferFor(assetIds: string[], excludeTransferId?: st
     where: { assetId: { in: assetIds }, transfer: { status: { in: ["draft", "requested", "approved", "in_transit", "disputed"] }, ...(excludeTransferId ? { NOT: { id: excludeTransferId } } : {}) } },
     include: { asset: true, transfer: true },
   });
+}
+
+/** Emit transfer.status_changed for the transfer's current state (once per state). Call after the change commits. */
+export async function emitTransferStatus(id: string) {
+  const t = await db.transfer.findUnique({ where: { id }, include: { fromSite: true, toSite: true, fromPartner: true, toPartner: true, items: { include: { asset: { select: { number: true } } } } } });
+  if (!t) return;
+  await emitEvent(t.orgId, "transfer.status_changed", {
+    transfer: t.number, status: t.status, reason: t.reason,
+    from: { site: t.fromSite.name, site_code: t.fromSite.code, company: t.fromPartner?.name ?? null },
+    to: { site: t.toSite.name, site_code: t.toSite.code, company: t.toPartner?.name ?? null },
+    assets: t.items.map((i) => i.asset.number), carrier: t.carrier || null, vehicle: t.vehicleNumber || null, eway_bill: t.ewayBillNumber || null,
+  }, { dedupeKey: `transfer:${t.id}:${t.status}` });
 }

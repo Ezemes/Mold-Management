@@ -20,6 +20,7 @@ import {
   reconcileHandovers,
   TRANSFER_REASONS,
   transferScope,
+  emitTransferStatus,
   type HandoverCheck,
   type TransferEvent,
 } from "@/lib/transfers";
@@ -106,6 +107,7 @@ async function submit(ctx: Ctx, id: string) {
     await tx.transfer.update({ where: { id: t.id }, data: { status: approval ? "requested" : "approved", requestedById: ctx.user.id, requestedAt: new Date(), ...(approval ? {} : { approvedAt: new Date() }) } });
     await audit(ctx, { action: approval ? "submitted" : "submitted_auto_approved", entityType: "transfer", entityId: t.id, entityLabel: label(t) }, tx);
   });
+  await emitTransferStatus(t.id);
   const link = `/transfers/${t.id}`;
   if (approval) {
     await notify(ctx.org.id, await recipientsFor(ctx.org.id, "transfers", "approve", { siteId: t.fromSiteId }), { kind: "transfer_approval", title: `Approve transfer ${t.number}`, body: `${t.items.length} asset(s) from ${t.fromSite.name} to ${t.toSite.name}.`, link }, { exceptUserId: ctx.user.id });
@@ -144,6 +146,7 @@ async function decide(fd: FormData, approve: boolean) {
   const link = `/transfers/${t.id}`;
   if (approve) await notify(ctx.org.id, await recipientsFor(ctx.org.id, "transfers", "edit", { siteId: t.fromSiteId, partnerIds: [t.fromPartnerId] }), { kind: "transfer_ship", title: `Ship transfer ${t.number}`, body: `Approved. Prepare ${t.items.length} asset(s) for dispatch to ${t.toSite.name}.`, link }, { exceptUserId: ctx.user.id });
   if (t.createdById && t.createdById !== ctx.user.id) await notify(ctx.org.id, [t.createdById], { kind: approve ? "transfer_approved" : "transfer_rejected", title: `Transfer ${t.number} ${approve ? "approved" : "rejected"}`, body: reason, link });
+  await emitTransferStatus(t.id);
   back(link, approve ? "Approved." : "Rejected.", "ok");
 }
 
@@ -158,6 +161,7 @@ export async function cancelTransferAction(fd: FormData) {
     await tx.transfer.update({ where: { id: t.id }, data: { status: "cancelled", cancelledReason: reason } });
     await audit(ctx, { action: "cancelled", entityType: "transfer", entityId: t.id, entityLabel: label(t), reason }, tx);
   });
+  await emitTransferStatus(t.id);
   back(`/transfers/${t.id}`, "Transfer cancelled.", "ok");
 }
 
@@ -227,6 +231,7 @@ export async function shipTransferAction(fd: FormData) {
   if (error) back(path, error);
   await afterReadings(ctx.org.id, t.items.map((it) => it.assetId));
   await notify(ctx.org.id, await recipientsFor(ctx.org.id, "transfers", "edit", { siteId: t.toSiteId, partnerIds: [t.toPartnerId] }), { kind: "transfer_receive", title: `Incoming transfer ${t.number}`, body: `${t.items.length} asset(s) dispatched from ${t.fromSite.name}. Record receipt when they arrive.`, link: path }, { exceptUserId: ctx.user.id });
+  await emitTransferStatus(t.id);
   back(path, "Dispatch recorded. The sender stays responsible until the receiver confirms receipt.", "ok");
 }
 
@@ -311,6 +316,7 @@ export async function receiveTransferAction(fd: FormData) {
   } else {
     await notify(ctx.org.id, watchers, { kind: "transfer_completed", title: `Transfer ${t.number} received`, body: `All assets accepted at ${t.toSite.name}.`, link: path }, { exceptUserId: ctx.user.id });
   }
+  await emitTransferStatus(t.id);
   back(path, disputes ? `Receipt recorded with ${disputes} dispute(s). Custody has passed to ${t.toSite.name}.` : "Receipt recorded. Custody has passed to the receiver and the transfer is complete.", disputes ? "error" : "ok");
 }
 
@@ -340,5 +346,6 @@ export async function resolveDisputeAction(fd: FormData) {
     await audit(ctx, { action: "dispute_resolved", entityType: "transfer", entityId: t.id, entityLabel: t.number, after: { asset: d.item.asset.number, kind: d.kind, workOrderId }, reason: resolution }, tx);
   });
   await emailPending();
+  await emitTransferStatus(t.id);
   back(path, "Dispute resolved.", "ok");
 }
