@@ -7,7 +7,7 @@ import { ASSET_STATUS, COMPONENT_ROLES, DOC_CATEGORIES, stdFieldsFor } from "@/l
 import { label } from "@/lib/labels";
 import { dateToLocalInput, fmtDate, fmtDateTime, fmtMoney, fmtNum, fmtUnit } from "@/lib/format";
 import { DELETION_REASON_HINT } from "@/lib/copy";
-import { Badge, btnClass, Card, cx, EmptyState, Field, FlashFromParams, Input, Notice, PageHeader, Select, Stat, Table, Td, Textarea } from "@/components/ui";
+import { Badge, btnClass, Card, cx, EmptyState, Field, FlashFromParams, Input, Notice, PageHeader, Select, Stat, Table, Td } from "@/components/ui";
 import { SubmitButton } from "@/components/client";
 import { LifeBar } from "@/components/life-bar";
 import {

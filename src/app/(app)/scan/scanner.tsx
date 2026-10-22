@@ -55,7 +55,7 @@ export function Scanner() {
         <button type="button" onClick={start} className="w-full rounded-md bg-brand-600 py-3 text-sm font-medium text-white">Start camera</button>
       )}
       {state === "found" && <p className="mt-2 text-sm text-emerald-700">Found, opening…</p>}
-      {state === "unsupported" && <p className="mt-2 text-sm text-amber-800">This browser cannot scan QR codes. Use your phone's camera app on the tag (it opens the same page) or enter the number below.</p>}
+      {state === "unsupported" && <p className="mt-2 text-sm text-amber-800">This browser cannot scan QR codes. Use your phone&apos;s camera app on the tag (it opens the same page) or enter the number below.</p>}
       {state === "denied" && <p className="mt-2 text-sm text-red-700">Camera access was blocked. Allow it in your browser settings, or enter the number below.</p>}
     </div>
   );

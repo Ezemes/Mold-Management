@@ -83,3 +83,61 @@ test("time zones: datetime-local in IST and other zones", () => {
   assert.equal(dateToLocalInput(new Date("2026-10-22T09:00:00Z"), "Asia/Kolkata"), "2026-10-22T14:30");
   assert.ok(Number.isNaN(localInputToDate("bad", "Asia/Kolkata").getTime()));
 });
+
+import { parseCsv, planAssetImport, planReadingImport, parseReadAt } from "../importer";
+
+const moldType = { id: "t1", key: "mold", name: "Injection mold", kind: "mold", archived: false, fields: [] };
+const lk = {
+  types: [moldType],
+  sites: [
+    { id: "s1", name: "Pune Plant 1", code: "PUN1", partnerId: null, active: true },
+    { id: "s2", name: "Brightway Chakan", code: "", partnerId: "p1", active: true },
+  ],
+  partners: [{ id: "p1", name: "Brightway Plastics" }],
+  existing: [{ id: "a1", number: "M-0001", assetTypeId: "t1", custodianPartnerId: null, customValues: {} }],
+};
+
+test("import: CSV parsing normalises headers and BOM", () => {
+  const r = parseCsv("﻿Number,Name,Design Cavities\r\nM-9,Cap,4\r\n\r\n");
+  assert.deepEqual(r.header, ["number", "name", "design_cavities"]);
+  assert.deepEqual(r.rows, [{ number: "M-9", name: "Cap", design_cavities: "4" }]);
+});
+
+test("import: assets create/update plans and row-level errors", () => {
+  const rows = [
+    { number: "M-0100", type: "mold", name: "Bezel", site: "pun1", design_cavities: "8" },
+    { number: "M-0001", name: "Renamed", warranty_shots: "5,00,000" },
+    { number: "M-0101", type: "mold", name: "Clip", site: "Brightway Chakan", owner: "Brightway Plastics" },
+    { number: "M-0102", type: "blow", name: "X", site: "PUN1" },
+    { number: "M-0001", name: "dup" },
+    { number: "M-0103", type: "mold", site: "PUN1" },
+    { number: "M-0001", site: "Brightway Chakan" },
+  ];
+  const { plans, errors } = planAssetImport(rows as unknown as Record<string, string>[], lk);
+  assert.equal(plans.length, 3);
+  assert.equal(plans[0].op, "create");
+  assert.equal((plans[0] as { siteId: string }).siteId, "s1");
+  assert.equal((plans[0] as { std: Record<string, unknown> }).std.designCavities, 8);
+  assert.equal(plans[1].op, "update");
+  assert.equal((plans[1] as { std: Record<string, unknown> }).std.warrantyShots, 500000);
+  assert.equal((plans[2] as { custodianPartnerId: string }).custodianPartnerId, "p1");
+  assert.deepEqual(errors.map((e) => e.row), [5, 6, 7, 8]);
+  assert.match(errors[0].message, /unknown type/);
+  assert.match(errors[1].message, /more than once/);
+  assert.match(errors[2].message, /name is required/);
+});
+
+test("import: readings parsed in org time zone and validated in time order", () => {
+  assert.equal(parseReadAt("15-10-2026 09:30", "Asia/Kolkata")!.toISOString(), "2026-10-15T04:00:00.000Z");
+  assert.equal(parseReadAt("2026-10-15", "Asia/Kolkata")!.toISOString(), "2026-10-15T06:30:00.000Z");
+  const meters = [{ meterId: "m1", assetId: "a1", number: "M-0001", offset: 0, lastRawValue: 1000, lastReadingAt: new Date("2026-10-01T00:00:00Z"), lifetimeTotal: 1000, cycleTimeS: null }];
+  const rows = [
+    { number: "M-0001", counter: "3,000", read_at: "2026-10-20 10:00" },
+    { number: "M-0001", counter: "2,000", read_at: "2026-10-10 10:00" }, // earlier in time, listed later: sorted first
+    { number: "M-0001", counter: "500", read_at: "2026-10-21 10:00" }, // backwards without reset
+    { number: "M-9999", counter: "1", read_at: "2026-10-21 10:00" },
+  ];
+  const { plans, errors } = planReadingImport(rows, meters, "Asia/Kolkata", new Date("2026-10-22T00:00:00Z"));
+  assert.deepEqual(plans.map((p) => p.rawValue), [2000, 3000]);
+  assert.deepEqual(errors.map((e) => e.row), [4, 5]);
+});
