@@ -50,3 +50,36 @@ test("readings: backdated, future and implausible values", () => {
   assert.equal(computeReading(m, { rawValue: 51000, readAt: later(11), source: "manual", cycleTimeS: 30, confirmHigh: true }, later(12)).delta, 50000);
   assert.equal(computeReading(m, { rawValue: 1100, readAt: later(11), source: "manual", cycleTimeS: 30 }, later(12)).delta, 100);
 });
+
+import { parseDate, readFieldValues } from "../asset-values";
+import type { FieldDef } from "@prisma/client";
+
+test("values: Indian and ISO dates, invalid dates", () => {
+  assert.equal((parseDate("2026-03-31", "d") as { value: Date }).value.toISOString().slice(0, 10), "2026-03-31");
+  assert.equal((parseDate("31/03/2026", "d") as { value: Date }).value.toISOString().slice(0, 10), "2026-03-31");
+  assert.equal(parseDate("31/02/2026", "d").ok, false);
+  assert.equal(parseDate("03-31-2026", "d").ok, false);
+});
+
+test("values: standard + custom fields with lakh grouping, picklists, required", () => {
+  const def = (o: Partial<FieldDef>) => ({ id: "x", assetTypeId: "t", unit: "", options: [], formula: "", required: false, section: "", helpText: "", sortOrder: 0, archived: false, createdAt: new Date(), ...o }) as FieldDef;
+  const defs = [def({ key: "grade", label: "Steel grade", type: "picklist", options: ["P20", "H13"] }), def({ key: "owner_ref", label: "Owner ref", type: "text", required: true }), def({ key: "ppm", label: "PPM", type: "formula", formula: "1" })];
+  const row: Record<string, string> = { design_cavities: "8", warranty_shots: "10,00,000", cf_grade: "h13", cf_owner_ref: "PO-77" };
+  const r = readFieldValues((k) => row[k], "mold", defs);
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.std.designCavities, 8);
+  assert.equal(r.std.warrantyShots, 1000000);
+  assert.deepEqual(r.custom, { grade: "H13", owner_ref: "PO-77" });
+  const bad = readFieldValues((k) => ({ design_cavities: "8.5", cf_grade: "S7" } as Record<string, string>)[k], "mold", defs);
+  assert.equal(bad.errors.length, 3); // non-integer cavities, bad picklist, missing required
+});
+
+import { dateToLocalInput, localInputToDate } from "../format";
+
+test("time zones: datetime-local in IST and other zones", () => {
+  assert.equal(localInputToDate("2026-10-22T14:30", "Asia/Kolkata").toISOString(), "2026-10-22T09:00:00.000Z");
+  assert.equal(localInputToDate("2026-07-01T09:00", "Europe/Berlin").toISOString(), "2026-07-01T07:00:00.000Z"); // CEST
+  assert.equal(localInputToDate("2026-01-15T09:00", "Europe/Berlin").toISOString(), "2026-01-15T08:00:00.000Z"); // CET
+  assert.equal(dateToLocalInput(new Date("2026-10-22T09:00:00Z"), "Asia/Kolkata"), "2026-10-22T14:30");
+  assert.ok(Number.isNaN(localInputToDate("bad", "Asia/Kolkata").getTime()));
+});
