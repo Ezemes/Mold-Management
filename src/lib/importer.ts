@@ -3,6 +3,7 @@ import type { FieldDef } from "@prisma/client";
 import { readFieldValues } from "./asset-values";
 import { computeReading, type ReadingError } from "./meters.pure";
 import { localInputToDate } from "./format";
+import { validateDowntime } from "./downtime.pure";
 
 export const MAX_IMPORT_ROWS = 10_000;
 
@@ -142,5 +143,61 @@ export function planReadingImport(rows: Record<string, string>[], meters: MeterS
     }
   }
   errors.sort((a, b) => a.row - b.row);
+  return { plans, errors };
+}
+
+// ─── Downtime ───────────────────────────────────────────────────────────────
+
+export type DowntimeLookups = {
+  /** Molds in the importer's scope */
+  assets: { id: string; number: string }[];
+  presses: { id: string; number: string }[];
+  codes: { id: string; code: string; category: string; active: boolean }[];
+  workOrders: { id: string; number: string; assetId: string }[];
+  existing: { assetId: string; number: string; startedAt: Date; endedAt: Date | null }[];
+};
+export type DowntimePlan = { row: number; assetId: string; assetNumber: string; codeId: string; category: string; startedAt: Date; endedAt: Date | null; pressId: string | null; workOrderId: string | null; description: string };
+
+/** Validate downtime rows: known mold, code, times, and no overlap with recorded events or other rows. */
+export function planDowntimeImport(rows: Record<string, string>[], lk: DowntimeLookups, tz: string, now = new Date()) {
+  const errors: RowError[] = [];
+  const plans: DowntimePlan[] = [];
+  const byNumber = new Map(lk.assets.map((a) => [norm(a.number), a]));
+  const taken = new Map<string, { number: string; startedAt: Date; endedAt: Date | null }[]>();
+  for (const e of lk.existing) taken.set(e.assetId, [...(taken.get(e.assetId) ?? []), e]);
+  rows.forEach((r, i) => {
+    const row = i + 2;
+    const fail = (m: string) => errors.push({ row, message: m });
+    const a = byNumber.get(norm(r.number ?? ""));
+    if (!a) return fail(`mold "${r.number ?? ""}" not found or not in your scope`);
+    const code = lk.codes.find((c) => norm(c.code) === norm(r.code ?? ""));
+    if (!code) return fail(`unknown code "${r.code ?? ""}". Use one of: ${lk.codes.filter((c) => c.active).map((c) => c.code).join(", ")}`);
+    if (!code.active) return fail(`code ${code.code} is switched off`);
+    const startedAt = r.started_at ? parseReadAt(r.started_at, tz) : null;
+    if (!startedAt || Number.isNaN(startedAt.getTime())) return fail("started_at must be YYYY-MM-DD HH:MM or DD-MM-YYYY HH:MM");
+    let endedAt: Date | null = null;
+    if (r.ended_at) {
+      endedAt = parseReadAt(r.ended_at, tz);
+      if (!endedAt || Number.isNaN(endedAt.getTime())) return fail("ended_at must be YYYY-MM-DD HH:MM or DD-MM-YYYY HH:MM, or blank if the mold is still down");
+    }
+    let pressId: string | null = null;
+    if (r.press) {
+      const p = lk.presses.find((x) => norm(x.number) === norm(r.press));
+      if (!p) return fail(`press "${r.press}" not found`);
+      pressId = p.id;
+    }
+    let workOrderId: string | null = null;
+    if (r.work_order) {
+      const w = lk.workOrders.find((x) => norm(x.number) === norm(r.work_order));
+      if (!w) return fail(`work order "${r.work_order}" not found`);
+      if (w.assetId !== a.id) return fail(`work order ${w.number} is for a different asset`);
+      workOrderId = w.id;
+    }
+    const others = taken.get(a.id) ?? [];
+    const problem = validateDowntime({ startedAt, endedAt }, others, now);
+    if (problem) return fail(`${a.number}: ${problem}`);
+    taken.set(a.id, [...others, { number: `row ${row}`, startedAt, endedAt }]);
+    plans.push({ row, assetId: a.id, assetNumber: a.number, codeId: code.id, category: code.category, startedAt, endedAt, pressId, workOrderId, description: (r.description ?? "").slice(0, 2000) });
+  });
   return { plans, errors };
 }

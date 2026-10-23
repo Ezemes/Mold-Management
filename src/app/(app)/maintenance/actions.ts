@@ -11,6 +11,7 @@ import { parseDate } from "@/lib/asset-values";
 import { str } from "@/lib/forms";
 import { flagRequalification } from "@/lib/quality";
 import { moveStock, parseQty, StockError } from "@/lib/inventory";
+import { emitDowntime, endLinkedDowntime } from "@/lib/downtime";
 import {
   checklistFromTemplate,
   emitWorkOrderClosed,
@@ -334,10 +335,11 @@ async function saveOrComplete(fd: FormData, complete: boolean) {
   const now = new Date();
   const doneShots = shotsAt ?? lifetime;
 
-  const follow = await db.$transaction(async (tx) => {
+  const done = await db.$transaction(async (tx) => {
     await tx.workOrder.update({ where: { id: wo.id }, data: { ...fields, status: "completed", completedAt: now, completedById: ctx.user.id, signedByName, signedAt: now, shotsAtCompletion: doneShots, startedAt: wo.startedAt ?? now } });
     await saveAttachments(tx, ctx.org.id, "work_order", wo.id, files, ctx.user.id);
     await audit(ctx, { action: "completed", entityType: "work_order", entityId: wo.id, entityLabel: wo.number, after: { asset: wo.asset.number, passPct: summary.passPct, failed: summary.failed.map((t) => t.text), shots: doneShots, signedBy: signedByName } }, tx);
+    const ended = await endLinkedDowntime(tx, ctx, wo.id, now, wo.number);
     // The plan's interval restarts from this service.
     if (wo.planId) await tx.maintenancePlan.update({ where: { id: wo.planId }, data: { baselineShots: doneShots ?? wo.plan?.baselineShots ?? 0, baselineDate: now, warnedAt: null } });
     const assetData: Prisma.AssetUpdateInput = {};
@@ -352,7 +354,7 @@ async function saveOrComplete(fd: FormData, complete: boolean) {
       await tx.asset.update({ where: { id: wo.assetId }, data: assetData });
       if (newStatus) await audit(ctx, { action: "status_changed", entityType: "asset", entityId: wo.assetId, entityLabel: `${wo.asset.number} ${wo.asset.name}`, before: { status: wo.asset.status }, after: { status: newStatus }, reason: `Work order ${wo.number} completed` }, tx);
     }
-    if (!followUp) return null;
+    if (!followUp) return { f: null, ended };
     const number = await nextWorkOrderNumber(tx, ctx.org.id);
     const f = await tx.workOrder.create({
       data: {
@@ -363,9 +365,11 @@ async function saveOrComplete(fd: FormData, complete: boolean) {
       },
     });
     await audit(ctx, { action: "created", entityType: "work_order", entityId: f.id, entityLabel: number, after: { asset: wo.asset.number, from: `failed checks on ${wo.number}` } }, tx);
-    return f;
+    return { f, ended };
   });
+  const follow = done.f;
   await emitWorkOrderClosed(wo.id);
+  for (const id of done.ended) await emitDowntime(id, "downtime.ended");
   if (follow) await notifyAssignee(ctx, follow, follow, wo.asset.siteId);
   if (wo.createdById && wo.createdById !== ctx.user.id) await notify(ctx.org.id, [wo.createdById], { kind: "wo_completed", title: `${wo.number} completed`, body: `${wo.title} on ${wo.asset.number}${summary.failed.length ? ` — ${summary.failed.length} failed check(s)` : ""}.`, link: path });
   back(follow ? `/maintenance/work-orders/${follow.id}` : path, follow ? `${wo.number} completed. Follow-up ${follow.number} raised for the failed checks.` : `${wo.number} completed and signed off.`, "ok");

@@ -5,6 +5,8 @@ export const API_SCOPES = {
   "readings:write": "Record shot readings",
   "transfers:read": "Read transfers",
   "work_orders:read": "Read work orders",
+  "downtime:read": "Read downtime events",
+  "downtime:write": "Record and end downtime events",
   "production:write": "Report production quantities (for shot reconciliation)",
   "reconciliation:read": "Read reconciliation exceptions",
   "sites:read": "Read sites and partners",

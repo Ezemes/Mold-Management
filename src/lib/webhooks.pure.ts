@@ -6,6 +6,8 @@ export const EVENT_TYPES = {
   "transfer.status_changed": "A transfer moved to a new state (requested, approved, in transit, disputed, completed, rejected, cancelled)",
   "work_order.closed": "A work order was completed or cancelled",
   "threshold.crossed": "A mold crossed a life threshold (80%/95% of warranty or end of life) or a maintenance plan fell due",
+  "downtime.started": "A mold went down (a downtime event was recorded)",
+  "downtime.ended": "A downtime event ended and the mold can run again",
   "reconciliation.exception": "A production report disagrees with the shot counter beyond tolerance",
 } as const;
 export type EventType = keyof typeof EVENT_TYPES | "ping";

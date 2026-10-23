@@ -3,3 +3,4 @@ export const PRESS_TABS: [string, string][] = [["/presses", "Press registry"], [
 export const QUALITY_TABS: [string, string][] = [["/quality", "Condition evaluations"], ["/quality/qualifications", "Qualifications"], ["/quality/templates", "Templates"]];
 export const INVENTORY_TABS: [string, string][] = [["/inventory", "Parts"], ["/inventory/stock", "Stock by site"], ["/inventory/ledger", "Ledger"], ["/inventory/reorder", "Reorder list"]];
 export const PLANNING_TABS: [string, string][] = [["/planning/forecast", "Life forecast"], ["/planning/capacity", "Capacity"], ["/planning/budget", "Budget"]];
+export const DOWNTIME_TABS: [string, string][] = [["/downtime", "Events"], ["/downtime/reports", "MTBF & availability"], ["/downtime/codes", "Reason codes"]];

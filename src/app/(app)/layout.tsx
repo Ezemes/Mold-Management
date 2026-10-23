@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireOrg } from "@/lib/auth";
+import { assetScope, requireOrg } from "@/lib/auth";
 import { OrgSwitcher, Shell, UserMenu, type NavItem } from "@/components/shell";
 import { Badge } from "@/components/ui";
 
@@ -10,10 +10,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const orgs = memberships.map((m) => ({ id: m.org.id, name: m.org.name }));
   const unread = await db.notification.count({ where: { userId: ctx.user.id, orgId: ctx.org.id, readAt: null } });
   const maintCount = ctx.can("maintenance") ? await db.notification.count({ where: { userId: ctx.user.id, orgId: ctx.org.id, readAt: null, kind: { in: ["pm_due", "wo_assigned", "wo_overdue"] } } }) : 0;
+  const downCount = ctx.can("downtime") ? await db.downtimeEvent.count({ where: { orgId: ctx.org.id, endedAt: null, asset: assetScope(ctx) } }) : 0;
   const actionCount = ctx.can("transfers") ? await db.notification.count({ where: { userId: ctx.user.id, orgId: ctx.org.id, readAt: null, kind: { startsWith: "transfer_" } } }) : 0;
 
   const nav: { title?: string; items: NavItem[] }[] = ctx.isSupplier
-    ? [{ items: [{ href: "/dashboard", label: "Home" }, { href: "/assets", label: "My molds" }, { href: "/transfers", label: "Transfers", badge: actionCount }, { href: "/maintenance", label: "Maintenance", badge: maintCount }, ...(ctx.can("quality") ? [{ href: "/quality", label: "Quality" }] : []), { href: "/scan", label: "Scan QR" }] }]
+    ? [{ items: [{ href: "/dashboard", label: "Home" }, { href: "/assets", label: "My molds" }, { href: "/transfers", label: "Transfers", badge: actionCount }, { href: "/maintenance", label: "Maintenance", badge: maintCount }, ...(ctx.can("downtime") ? [{ href: "/downtime", label: "Downtime", badge: downCount }] : []), ...(ctx.can("quality") ? [{ href: "/quality", label: "Quality" }] : []), { href: "/scan", label: "Scan QR" }] }]
     : [
         { items: [{ href: "/dashboard", label: "Dashboard" }] },
         {
@@ -22,6 +23,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             { href: "/assets", label: "Assets" },
             ...(ctx.can("transfers") ? [{ href: "/transfers", label: "Transfers", badge: actionCount }] : []),
             ...(ctx.can("maintenance") ? [{ href: "/maintenance", label: "Maintenance", badge: maintCount }] : []),
+            ...(ctx.can("downtime") ? [{ href: "/downtime", label: "Downtime", badge: downCount }] : []),
             ...(ctx.can("readings") ? [{ href: "/reconciliation", label: "Reconciliation" }] : []),
             { href: "/presses", label: "Presses" },
             ...(ctx.can("quality") ? [{ href: "/quality", label: "Quality" }] : []),

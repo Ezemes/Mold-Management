@@ -73,6 +73,8 @@ model Organisation {
   reconExceptions     ReconciliationException[]
   ssoConnections      SsoConnection[]
   inspectionTemplates InspectionTemplate[]
+  downtimeCodes       DowntimeCode[]
+  downtime            DowntimeEvent[]
 }
 
 model Division {
@@ -438,6 +440,8 @@ model Asset {
   budgetItems     BudgetItem[]
   production      ProductionReport[]
   reconExceptions ReconciliationException[]
+  downtime        DowntimeEvent[]           @relation("DowntimeAsset")
+  downtimeOnPress DowntimeEvent[]           @relation("DowntimePress")
 
   @@unique([orgId, number])
   @@index([orgId, siteId])
@@ -749,8 +753,9 @@ model WorkOrder {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  labor WorkOrderLabor[]
-  parts WorkOrderPart[]
+  labor    WorkOrderLabor[]
+  parts    WorkOrderPart[]
+  downtime DowntimeEvent[]
 
   @@unique([orgId, number])
   @@index([orgId, status])
@@ -1234,4 +1239,54 @@ model InspectionTemplate {
   updatedAt  DateTime     @updatedAt
 
   @@unique([orgId, name])
+}
+
+/// Reasons a mold stops (spec §4.9). category: failure (counts towards MTBF) | planned | external (not the mold's fault).
+model DowntimeCode {
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  category  String
+  active    Boolean      @default(true)
+  sortOrder Int          @default(0)
+  createdAt DateTime     @default(now())
+
+  events DowntimeEvent[]
+
+  @@unique([orgId, code])
+}
+
+/// A period when a mold could not run. endedAt null = still down.
+model DowntimeEvent {
+  id           String       @id @default(cuid())
+  orgId        String
+  org          Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  number       String
+  assetId      String
+  asset        Asset        @relation("DowntimeAsset", fields: [assetId], references: [id], onDelete: Restrict)
+  /// The press the mold was in, if any
+  pressId      String?
+  press        Asset?       @relation("DowntimePress", fields: [pressId], references: [id], onDelete: SetNull)
+  codeId       String
+  code         DowntimeCode @relation(fields: [codeId], references: [id], onDelete: Restrict)
+  /// Copied from the code when recorded, so recategorising a code does not rewrite history
+  category     String
+  startedAt    DateTime
+  endedAt      DateTime?
+  description  String       @default("")
+  workOrderId  String?
+  workOrder    WorkOrder?   @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  /// manual | import | api
+  source       String       @default("manual")
+  reportedById String?
+  endedById    String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@unique([orgId, number])
+  @@index([orgId, startedAt])
+  @@index([assetId, startedAt])
+  @@index([workOrderId])
 }

@@ -6,7 +6,10 @@ import { db } from "@/lib/db";
 import { assertCan, assetScope, requireOrg, siteScope, type Ctx } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { features } from "@/lib/assets";
-import { parseCsv, planAssetImport, planReadingImport, type AssetLookups, type MeterState } from "@/lib/importer";
+import { parseCsv, planAssetImport, planDowntimeImport, planReadingImport, type AssetLookups, type DowntimeLookups, type MeterState } from "@/lib/importer";
+import { createDowntime, downtimeCodes } from "@/lib/downtime";
+import { pressScope } from "@/lib/compat";
+import type { Module } from "@/lib/permissions";
 import { afterReadings } from "@/lib/maintenance";
 import { recordReading } from "@/lib/meters";
 import { str, token } from "@/lib/forms";
@@ -30,22 +33,39 @@ async function meterStates(ctx: Ctx): Promise<MeterState[]> {
   return meters.map((m) => ({ meterId: m.id, assetId: m.assetId, number: m.asset.number, offset: m.offset, lastRawValue: m.lastRawValue, lastReadingAt: m.lastReadingAt, lifetimeTotal: m.lifetimeTotal, cycleTimeS: m.asset.designCycleTimeS }));
 }
 
+async function downtimeLookups(ctx: Ctx): Promise<DowntimeLookups> {
+  const [assets, presses, codes, workOrders, existing] = await Promise.all([
+    db.asset.findMany({ where: { AND: [assetScope(ctx), { assetType: { kind: "mold" } }] }, select: { id: true, number: true } }),
+    db.asset.findMany({ where: pressScope(ctx), select: { id: true, number: true } }),
+    downtimeCodes(ctx.org.id, false),
+    db.workOrder.findMany({ where: { orgId: ctx.org.id, asset: assetScope(ctx) }, select: { id: true, number: true, assetId: true } }),
+    db.downtimeEvent.findMany({ where: { orgId: ctx.org.id, asset: assetScope(ctx) }, select: { assetId: true, number: true, startedAt: true, endedAt: true } }),
+  ]);
+  return { assets, presses, codes, workOrders, existing };
+}
+
+type Kind = "assets" | "readings" | "downtime";
+const KIND_MODULE: Record<Kind, Module> = { assets: "assets", readings: "readings", downtime: "downtime" };
+const REQUIRED: Record<Kind, string[]> = { assets: ["number"], readings: ["number", "counter", "read_at"], downtime: ["number", "code", "started_at"] };
+
 async function plan(ctx: Ctx, kind: string, rows: Record<string, string>[]) {
-  return kind === "assets" ? planAssetImport(rows, await assetLookups(ctx)) : planReadingImport(rows, await meterStates(ctx), ctx.org.timezone);
+  if (kind === "assets") return planAssetImport(rows, await assetLookups(ctx));
+  if (kind === "downtime") return planDowntimeImport(rows, await downtimeLookups(ctx), ctx.org.timezone);
+  return planReadingImport(rows, await meterStates(ctx), ctx.org.timezone);
 }
 
 export async function validateImportAction(fd: FormData) {
   const ctx = await requireOrg();
   assertCan(ctx, "import_export", "create");
-  const kind = str(fd, "kind") === "readings" ? "readings" : "assets";
-  assertCan(ctx, kind === "assets" ? "assets" : "readings", "create");
+  const kind: Kind = str(fd, "kind") === "readings" ? "readings" : str(fd, "kind") === "downtime" ? "downtime" : "assets";
+  assertCan(ctx, KIND_MODULE[kind], "create");
   const file = fd.get("file");
   if (!(file instanceof File) || file.size === 0) back("/import-export", "Choose a CSV file.");
   if (file.size > 5 * 1024 * 1024) back("/import-export", "CSV files must be 5 MB or smaller.");
   const parsed = parseCsv(await file.text());
   if (parsed.error) back("/import-export", parsed.error);
   if (!parsed.rows.length) back("/import-export", "The file has no data rows.");
-  const required = kind === "assets" ? ["number"] : ["number", "counter", "read_at"];
+  const required = REQUIRED[kind];
   const missing = required.filter((h) => !parsed.header.includes(h));
   if (missing.length) back("/import-export", `Missing column(s): ${missing.join(", ")}. Download the template for the expected headers.`);
   const { errors } = await plan(ctx, kind, parsed.rows);
@@ -63,7 +83,7 @@ export async function applyImportAction(fd: FormData) {
   const path = `/import-export/${job.id}`;
   if (job.status !== "validated") back(path, "This import was already applied.");
   if (job.createdById !== ctx.user.id) back(path, "Only the person who uploaded the file can apply it.");
-  assertCan(ctx, job.kind === "assets" ? "assets" : "readings", "create");
+  assertCan(ctx, KIND_MODULE[job.kind as Kind] ?? "assets", "create");
   // Re-plan against current data: the fleet may have changed since validation.
   const rows = job.payload as Record<string, string>[];
   const result = await plan(ctx, job.kind, rows);
@@ -108,6 +128,12 @@ export async function applyImportAction(fd: FormData) {
             updated++;
           }
         }
+      } else if (job.kind === "downtime") {
+        for (const { row: _row, ...p } of result.plans as ReturnType<typeof planDowntimeImport>["plans"]) {
+          void _row;
+          await createDowntime(tx, { orgId: ctx.org.id, userId: ctx.user.id }, { ...p, source: "import" }, `CSV import ${job.filename}`);
+          created++;
+        }
       } else {
         for (const p of result.plans as ReturnType<typeof planReadingImport>["plans"]) {
           const meter = await tx.meter.findUniqueOrThrow({ where: { id: p.meterId }, include: { asset: { select: { designCycleTimeS: true } } } });
@@ -120,6 +146,6 @@ export async function applyImportAction(fd: FormData) {
     },
     { timeout: 300_000, maxWait: 10_000 },
   );
-  if (job.kind !== "assets") await afterReadings(ctx.org.id, [...new Set((result.plans as ReturnType<typeof planReadingImport>["plans"]).map((p) => p.assetId))]);
-  back(path, job.kind === "assets" ? `Imported: ${created} created, ${updated} updated.` : `Imported ${created} readings.`, "ok");
+  if (job.kind === "readings") await afterReadings(ctx.org.id, [...new Set((result.plans as ReturnType<typeof planReadingImport>["plans"]).map((p) => p.assetId))]);
+  back(path, job.kind === "assets" ? `Imported: ${created} created, ${updated} updated.` : job.kind === "downtime" ? `Imported ${created} downtime events.` : `Imported ${created} readings.`, "ok");
 }

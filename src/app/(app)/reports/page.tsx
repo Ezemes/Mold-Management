@@ -9,6 +9,7 @@ export default async function ReportsPage() {
   const ctx = await requireOrg(["reports", "view"]);
   const more: [string, string, string, boolean][] = [
     ["/maintenance/reports", "Maintenance compliance", "PM on-time %, overdue work, MTTR and MTBF.", ctx.can("maintenance")],
+    ["/downtime/reports", "MTBF and availability", "Downtime by mold, asset type or site, and the reasons that cost the most hours.", ctx.can("downtime")],
     ["/planning/capacity", "Capacity shortfalls", "Months where product demand exceeds mold capacity.", ctx.can("planning")],
     ["/inventory/reorder", "Reorder list", "Spare parts at or below their reorder point.", ctx.can("inventory")],
     ["/admin/audit", "Audit log", "Every change, exportable.", ctx.can("audit")],

@@ -23,7 +23,7 @@ export default async function ImportExportPage({ searchParams }: { searchParams:
         {ctx.can("import_export", "create") && (
           <Card title="Import">
             <form action={validateImportAction} className="space-y-3" encType="multipart/form-data">
-              <Field label="What are you importing?"><Select name="kind" options={{ assets: "Assets (create or update by number)", readings: "Shot readings" }} /></Field>
+              <Field label="What are you importing?"><Select name="kind" options={{ assets: "Assets (create or update by number)", readings: "Shot readings", ...(ctx.can("downtime", "create") ? { downtime: "Downtime events" } : {}) }} /></Field>
               <Field label="CSV file (max 5 MB, 10,000 rows)"><input type="file" name="file" accept=".csv,text/csv" required className="block text-sm" /></Field>
               <SubmitButton pendingText="Checking…">Validate (dry run)</SubmitButton>
             </form>
@@ -32,6 +32,7 @@ export default async function ImportExportPage({ searchParams }: { searchParams:
               <ul className="space-y-1">
                 {types.map((t) => <li key={t.id}><a className="text-brand-700 hover:underline" href={`/import-export/template/assets?type=${t.key}`}>Assets: {t.name}</a></li>)}
                 <li><a className="text-brand-700 hover:underline" href="/import-export/template/readings" download>Shot readings</a></li>
+                {ctx.can("downtime", "create") && <li><a className="text-brand-700 hover:underline" href="/import-export/template/downtime" download>Downtime events</a></li>}
               </ul>
               <p className="mt-2 text-xs text-ink-500">Dates: YYYY-MM-DD or DD-MM-YYYY. Numbers may use Indian grouping (1,00,000). Sites match by name or code. Times are {ctx.org.timezone}.</p>
             </div>
@@ -41,6 +42,7 @@ export default async function ImportExportPage({ searchParams }: { searchParams:
           <div className="flex flex-wrap gap-2">
             <a className={btnClass("secondary")} href="/import-export/assets.csv">All assets (CSV)</a>
             <a className={btnClass("secondary")} href="/import-export/readings.csv">All shot readings (CSV)</a>
+            {ctx.can("downtime") && <a className={btnClass("secondary")} href="/import-export/downtime.csv">All downtime (CSV)</a>}
           </div>
           <p className="mt-3 text-xs text-ink-500">Exports contain only assets in your scope. The asset export uses the same columns as the import template, so you can edit it in Excel and import it back.</p>
         </Card>

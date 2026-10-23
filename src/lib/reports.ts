@@ -8,6 +8,8 @@ import { actualByCategory, BUDGET_CATEGORIES, type BudgetCategory } from "./plan
 import { woCost } from "./maintenance";
 import { calculate, CALC_FIELDS, inputFromAsset, type Calc, type CalcKey } from "./calc.pure";
 import { assessmentOutcome, ratingWord, type Answers, type ComponentResult } from "./inspection.pure";
+import { durationHours, loadMetrics } from "./downtime";
+import { dateToLocalInput } from "./format";
 
 export type Cell = string | number | null;
 export type Report = { title: string; description: string; columns: string[]; rows: Cell[][]; numeric?: number[]; footer?: Cell[] };
@@ -25,6 +27,8 @@ export const REPORTS = {
   reconciliation: { title: "Reconciliation exceptions", description: "Production reports whose parts ÷ cavities disagree with the shot counter beyond tolerance." },
   inspection_summary: { title: "Inspection summary", description: "One row per mold with the columns of the inspection template's Summary sheet." },
   calculated_fields: { title: "Calculated fields", description: "Lifecycle and capacity calculations for every mold, with the inputs each one still needs." },
+  availability: { title: "MTBF and availability", description: "Each mold over the last 12 months: availability, MTBF, MTTR, failures and hours lost by category." },
+  downtime_events: { title: "Downtime events", description: "Every downtime event in the last 12 months, with reason, category, duration and work order." },
   data_quality: { title: "Data quality", description: "Mold passports missing fields needed for life tracking, planning and press compatibility." },
 } as const;
 export type ReportKey = keyof typeof REPORTS;
@@ -156,6 +160,28 @@ export async function buildReport(ctx: Ctx, key: ReportKey, now = new Date()): P
         return [m.number, m.name, m.process, m.site.name, ...keys.map((k) => fmt(all[k].value)), missing.join(", ")];
       });
       return { ...meta, description: `${meta.description} Costs in ${ctx.org.cavityCostCurrency}.`, columns: ["Mold", "Name", "Process", "Site", ...keys.map((k) => CALC_FIELDS[k].label), "Missing inputs"], rows, numeric: keys.map((_, i) => i + 4).filter((i) => !["date", "text"].includes(CALC_FIELDS[keys[i - 4]].kind)) };
+    }
+    case "availability": {
+      const m = await loadMetrics(ctx, new Date(now.getTime() - 365 * DAY), now, {}, now);
+      const r1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
+      const rows = m.assets.map((a) => {
+        const s = m.perAsset.get(a.id)!;
+        return [a.number, a.name, a.site.name, r1(s.availabilityPct), r1(s.mtbfHours), r1(s.mttrHours), s.failures, r1(s.failureHours), r1(s.plannedHours), r1(s.externalHours), s.openNow ? "Yes" : "No"];
+      });
+      const t = m.total;
+      return { ...meta, columns: ["Mold", "Name", "Site", "Availability %", "MTBF (h)", "MTTR (h)", "Failures", "Failure (h)", "Planned (h)", "External (h)", "Down now"], rows, numeric: [3, 4, 5, 6, 7, 8, 9], footer: ["Fleet", "", "", r1(t.availabilityPct), r1(t.mtbfHours), r1(t.mttrHours), t.failures, r1(t.failureHours), r1(t.plannedHours), r1(t.externalHours), t.openNow] };
+    }
+    case "downtime_events": {
+      const since = new Date(now.getTime() - 365 * DAY);
+      const evs = await db.downtimeEvent.findMany({
+        where: { orgId: ctx.org.id, asset: scope, OR: [{ startedAt: { gte: since } }, { endedAt: null }] },
+        include: { asset: { select: { number: true, site: { select: { name: true } } } }, press: { select: { number: true } }, code: true, workOrder: { select: { number: true } } },
+        orderBy: { startedAt: "desc" },
+        take: 20_000,
+      });
+      const local = (d: Date | null) => (d ? dateToLocalInput(d, ctx.org.timezone).replace("T", " ") : "");
+      const rows = evs.map((e) => [e.number, e.asset.number, e.asset.site.name, e.press?.number ?? "", e.code.code, e.code.name, e.category, local(e.startedAt), local(e.endedAt), Math.round(durationHours(e, now) * 10) / 10, e.workOrder?.number ?? "", e.description]);
+      return { ...meta, description: `${meta.description} Times are ${ctx.org.timezone}.`, columns: ["Event", "Mold", "Site", "Press", "Code", "Reason", "Category", "Started", "Ended", "Hours", "Work order", "Description"], rows, numeric: [9] };
     }
     case "data_quality": {
       const molds = await db.asset.findMany({ where: { AND: [scope, { assetType: { kind: "mold" }, parentId: null, status: { notIn: ["retired", "scrapped"] } }] }, include: { meters: true, products: { select: { id: true } } }, orderBy: { number: "asc" } });

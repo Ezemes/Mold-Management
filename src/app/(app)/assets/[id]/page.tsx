@@ -14,6 +14,8 @@ import { CalcValue } from "@/components/calc-value";
 import { CALC_FIELDS, type Calc, type CalcKey } from "@/lib/calc.pure";
 import { moldsForPress, pressesForMold } from "@/lib/compat";
 import { planState, woCost, WO_BADGE, WO_STATUS, WO_TYPES, workOrderScope } from "@/lib/maintenance";
+import { durationHours, fmtDuration, loadMetrics } from "@/lib/downtime";
+import { CategoryBadge } from "@/components/downtime";
 import {
   addProductAction,
   addReadingAction,
@@ -37,6 +39,7 @@ const TABS = [
   ["counter", "Shot counter"],
   ["documents", "Documents"],
   ["maintenance", "Maintenance"],
+  ["downtime", "Downtime"],
   ["presses", "Presses"],
   ["quality", "Condition & qualification"],
   ["custody", "Custody & transfers"],
@@ -53,7 +56,7 @@ export default async function PassportPage({ params, searchParams }: { params: P
   const org = ctx.org;
   const tz = org.timezone;
   const kind = a.assetType.kind;
-  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "maintenance" ? ctx.can("maintenance") : k === "calculated" ? kind === "mold" : k === "presses" ? kind === "mold" || kind === "press" : k === "quality" ? ctx.can("quality") && kind !== "press" : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
+  const tabs = TABS.filter(([k]) => (k === "counter" ? live.features.meters : k === "documents" ? live.features.documents && ctx.can("documents") : k === "history" ? ctx.can("audit") || !ctx.isSupplier : k === "custody" ? ctx.can("transfers") : k === "maintenance" ? ctx.can("maintenance") : k === "downtime" ? ctx.can("downtime") && (kind === "mold" || kind === "press") : k === "calculated" ? kind === "mold" : k === "presses" ? kind === "mold" || kind === "press" : k === "quality" ? ctx.can("quality") && kind !== "press" : k === "components" ? live.features.components || live.features.cavities || live.features.products : true));
   const tab = tabs.find(([k]) => k === sp.tab)?.[0] ?? "overview";
   const hid = <input type="hidden" name="id" value={a.id} />;
   const canEdit = ctx.can("assets", "edit");
@@ -75,6 +78,11 @@ export default async function PassportPage({ params, searchParams }: { params: P
     db.conditionEvaluation.findMany({ where: { assetId: a.id }, orderBy: { evaluatedAt: "desc" }, take: 50 }),
     db.qualification.findMany({ where: { assetId: a.id }, include: { press: true }, orderBy: { createdAt: "desc" } }),
   ]) : [[], []];
+  const dtStart = new Date(Date.now() - 90 * 86_400_000);
+  const [dtEvents, dtStats] = tab === "downtime" ? await Promise.all([
+    db.downtimeEvent.findMany({ where: kind === "press" ? { pressId: a.id } : { assetId: a.id }, include: { code: true, asset: { select: { number: true } }, press: { select: { number: true } }, workOrder: { select: { id: true, number: true } } }, orderBy: { startedAt: "desc" }, take: 100 }),
+    kind === "mold" ? loadMetrics(ctx, dtStart, new Date(), { id: a.id }).then((m) => m.perAsset.get(a.id) ?? null) : Promise.resolve(null),
+  ]) : [[], null];
   const compat = tab === "presses" ? (kind === "press" ? await moldsForPress(ctx, a.id) : await pressesForMold(ctx, a.id)) : [];
   const [readings, history, moveSites, allSites] = await Promise.all([
     tab === "counter" && live.shots ? db.meterReading.findMany({ where: { meterId: live.shots.id }, orderBy: { readAt: "desc" }, take: 100, include: { enteredBy: true } }) : Promise.resolve([]),
@@ -446,6 +454,36 @@ export default async function PassportPage({ params, searchParams }: { params: P
                   <Td><Badge status={WO_BADGE[w.status]}>{label(WO_STATUS, w.status)}</Badge></Td>
                   <Td className="text-xs">{w.completedAt ? `Done ${fmtDate(w.completedAt, tz)}` : `Due ${fmtDate(w.dueDate, tz)}`}</Td>
                   <Td className="text-xs">{fmtMoney(woCost(w).total, org)}</Td>
+                </tr>
+              ))}
+            </Table>
+          </Card>
+        </div>
+      )}
+
+      {tab === "downtime" && (
+        <div className="space-y-6">
+          {dtStats && (
+            <div className="grid gap-4 sm:grid-cols-4">
+              <Stat label="Availability (90 days)" value={dtStats.availabilityPct == null ? "—" : `${fmtNum(dtStats.availabilityPct, org, 1)}%`} hint={`${fmtDuration(dtStats.moldDownHours)} failure and planned downtime`} />
+              <Stat label="MTBF" value={fmtDuration(dtStats.mtbfHours)} hint={`${dtStats.failures} failure(s)`} />
+              <Stat label="MTTR" value={fmtDuration(dtStats.mttrHours)} hint={`${dtStats.repairs} finished repair(s)`} />
+              <Stat label="External downtime" value={fmtDuration(dtStats.externalHours)} hint="Press, material, orders: not counted" />
+            </div>
+          )}
+          <Card
+            title={kind === "press" ? "Downtime of molds on this press" : "Downtime events"}
+            actions={ctx.can("downtime", "create") && kind === "mold" && <Link href={`/downtime/new?asset=${encodeURIComponent(a.number)}`} className={btnClass("secondary", "sm")}>Record downtime</Link>}
+          >
+            <Table head={["Event", ...(kind === "press" ? ["Mold"] : []), "Reason", "Started", "Duration", "Work order"]} empty="No downtime recorded.">
+              {dtEvents.map((e) => (
+                <tr key={e.id}>
+                  <Td><Link href={`/downtime/${e.id}`} className="font-medium hover:text-brand-700">{e.number}</Link>{!e.endedAt && <p className="text-xs font-medium text-red-700">Still down</p>}</Td>
+                  {kind === "press" && <Td className="text-xs">{e.asset.number}</Td>}
+                  <Td className="text-xs"><CategoryBadge category={e.category} /> {e.code.name}{e.description && <p className="text-ink-500">{e.description}</p>}</Td>
+                  <Td className="text-xs">{fmtDateTime(e.startedAt, tz)}</Td>
+                  <Td className="text-xs">{fmtDuration(durationHours(e))}</Td>
+                  <Td className="text-xs">{e.workOrder ? <Link href={`/maintenance/work-orders/${e.workOrder.id}`} className="text-brand-700 hover:underline">{e.workOrder.number}</Link> : "—"}</Td>
                 </tr>
               ))}
             </Table>

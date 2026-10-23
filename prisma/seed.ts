@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { setupOrganisation } from "../src/lib/org-setup";
 import { parseTaskLines } from "../src/lib/maintenance.pure";
 import { DEFAULT_TEMPLATES } from "../src/lib/inspection.pure";
+import { DEFAULT_CODES } from "../src/lib/downtime.pure";
 
 const db = new PrismaClient();
 const PASSWORD = "Demo@12345";
@@ -175,6 +176,33 @@ async function main() {
 
     // ── Inspection templates (from the Injection / Injection Blow templates and the Workflow-based Inspection)
     await tx.inspectionTemplate.createMany({ data: DEFAULT_TEMPLATES.map((t) => ({ orgId: org.id, name: t.name, processes: t.processes, isDefault: t.isDefault, components: t.components as unknown as Prisma.InputJsonValue })) });
+
+    // ── Downtime (spec §4.9): failures, planned stops and external stops; M-0005 is down now.
+    await tx.downtimeCode.createMany({ data: DEFAULT_CODES.map((c, i) => ({ orgId: org.id, ...c, sortOrder: i })) });
+    const codeId = Object.fromEntries((await tx.downtimeCode.findMany({ where: { orgId: org.id } })).map((c) => [c.code, c]));
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+    const presses = Object.fromEntries((await tx.asset.findMany({ where: { orgId: org.id, assetTypeId: types.press.id } })).map((p) => [p.number, p.id]));
+    const downtime: [string, string, number, number | null, string, string | null, string | null][] = [
+      // mold, code, started (hours ago), length (hours; null = still down), description, press, work order
+      ["M-0003", "COOL", 75 * 24, 5, "Water leak at circuit 4 fitting; fitting replaced", "P-0002", null],
+      ["M-0003", "HR", 50 * 24, 8, "Zone 6 heater open circuit", "P-0002", null],
+      ["M-0001", "CHANGE", 30 * 24, 2, "Changeover from M-0002", "P-0001", null],
+      ["M-0003", "QUAL", 20 * 24, 48, "Flash on louvre blade 3", "P-0002", "WO-00002"],
+      ["M-0001", "PRESS", 12 * 24, 6, "Engel hydraulic fault (press, not mold)", "P-0001", null],
+      ["M-0003", "CHANGE", 10 * 24, 1.5, "Colour change", "P-0002", null],
+      ["M-0002", "MATL", 5 * 24, 4, "Resin delivery late", null, null],
+      ["M-0005", "HR", 5, null, "Hot-runner nozzle 3 not heating", null, null],
+    ];
+    const wos = Object.fromEntries((await tx.workOrder.findMany({ where: { orgId: org.id } })).map((w) => [w.number, w.id]));
+    for (const [i, [n, code, ago, len, description, press, wo]] of downtime.entries()) {
+      const c = codeId[code];
+      await tx.downtimeEvent.create({
+        data: {
+          orgId: org.id, number: `DT-${String(i + 1).padStart(5, "0")}`, assetId: byNum[n].id, codeId: c.id, category: c.category, startedAt: hoursAgo(ago), endedAt: len == null ? null : hoursAgo(ago - len),
+          description, pressId: press ? presses[press] : null, workOrderId: wo ? wos[wo] : null, reportedById: tech.id, endedById: len == null ? null : tech.id,
+        },
+      });
+    }
 
     // ── Spare parts with stock; the thermocouple is below its reorder point
     await tx.assetType.update({ where: { id: types.mold.id }, data: { budgetRules: { pmCostPerService: 12_000, partsPerCavity: 3_000, refurbCost: 250_000, replacementCost: 1_200_000 } } });

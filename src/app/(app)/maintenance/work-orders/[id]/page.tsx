@@ -55,6 +55,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
       : Promise.resolve(null),
   ]);
   const open = OPEN_WO.includes(wo.status);
+  const downtime = ctx.can("downtime") ? await db.downtimeEvent.findMany({ where: { workOrderId: wo.id }, select: { id: true, number: true, endedAt: true }, orderBy: { startedAt: "asc" } }) : [];
   const stock = open && !ctx.isSupplier && ctx.can("inventory", "edit")
     ? await db.stock.findMany({ where: { siteId: wo.asset.siteId, quantity: { gt: 0 }, part: { active: true } }, include: { part: { include: { assets: { where: { assetId: wo.assetId } } } } }, orderBy: { part: { number: "asc" } } })
     : [];
@@ -320,10 +321,12 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
                   {wo.source === "trigger" && wo.plan ? <>Plan: {wo.plan.template.name} (every {fmtNum(wo.plan.interval, org)} {wo.plan.triggerType})</>
                     : source && "transfer" in source ? <Link href={`/transfers/${source.id}`} className="text-brand-700 hover:underline">Dispute on {source.number}</Link>
                     : source ? <Link href={`/maintenance/work-orders/${source.id}`} className="text-brand-700 hover:underline">Failed checks on {source.number}</Link>
+                    : wo.source === "downtime" ? "Downtime report"
                     : wo.source.replace("_", " ")}
                 </dd>
               </div>
               {wo.template && <div className="flex justify-between gap-3"><dt className="text-ink-500">Template</dt><dd>{wo.template.name}</dd></div>}
+              {downtime.length > 0 && <div className="flex justify-between gap-3"><dt className="text-ink-500">Downtime</dt><dd className="text-right">{downtime.map((d) => <Link key={d.id} href={`/downtime/${d.id}`} className="ml-2 text-brand-700 hover:underline">{d.number}{!d.endedAt && " (mold down)"}</Link>)}</dd></div>}
             </dl>
             {followUps.length > 0 && (
               <p className="mt-3 text-sm">

@@ -152,7 +152,28 @@ Details, formulas and decisions are in [`docs/CALCULATIONS_AND_INSPECTIONS.md`](
   - Ends with the templates' questions, then a review.
 - **Reports:** *Inspection summary* (the templates' Summary sheet) and *Calculated fields*.
 
-Not yet built: downtime events (§4.9); Phase 4 (native app, ERP/BI connectors, sensors, AI).
+## Downtime (spec §4.9)
+
+- **Downtime events** (Downtime → Record downtime, or the passport's Downtime tab): mold, reason code, start and end, the press it was in, a description and a linked work order.
+  - Leave the end blank while the mold is still down. "Back up" on the list (or End downtime on the event) closes it.
+  - Events on the same mold can't overlap, can't start or end in the future, and must end after they start.
+  - Recording a breakdown can **raise a work order**. Completing that work order (or any linked one) ends the downtime automatically.
+  - Maintenance users at the site are notified when a mold goes down with a failure.
+  - Corrections need a reason and are kept in the event's history; deleting needs the delete permission and a reason.
+- **Reason codes** (Downtime → Reason codes) start with 13 standard codes. Each has a category that decides how its time counts:
+  - **Failure:** the mold broke down. Counts towards MTBF and MTTR, and against availability.
+  - **Planned:** maintenance, refurbishment, mold change, trial. Counts against availability only.
+  - **External:** press breakdown, no material, no orders, utilities. Recorded, but not held against the mold.
+  - Events keep the category they were recorded with if a code is later recategorised.
+- **MTBF and availability** (Downtime → MTBF & availability, by mold, asset type or site, over 30 days, 90 days or 12 months):
+  - Availability = (time − failure and planned downtime) ÷ time. MTBF = that running time ÷ failures. MTTR = average length of finished failure events.
+  - Time is calendar time from when each mold was first tracked: its passport's creation, or its earliest recorded downtime if history was imported.
+  - Reasons are ranked by hours lost.
+  - Maintenance compliance now takes MTBF and MTTR from downtime when any is recorded, and falls back to corrective work orders otherwise.
+- **Also:** "Molds down now" on the dashboard and a count in the sidebar; CSV import and export (Import & export); reports *MTBF and availability* and *Downtime events*; API `GET/POST /api/v1/downtime` and `GET/PATCH /api/v1/downtime/{number}` (scopes `downtime:read`, `downtime:write`); webhooks `downtime.started` and `downtime.ended` (not sent for CSV imports of history).
+- **Permissions:** a new *Downtime* module. Tooling managers have full access; quality engineers, technicians and supplier users record and end downtime on molds in their scope; planners and viewers can view. Reason codes are managed by roles with Downtime → approve.
+
+Not yet built: Phase 4 (native app, ERP/BI connectors, sensors, AI).
 
 ## Stack
 
@@ -182,12 +203,13 @@ To start without demo data, register at `/register`; you become the organisation
 ## Tests
 
 ```bash
-npm test             # unit tests (49): formulas, shot counters, CSV import, transfers, maintenance, compatibility, quality, stock, planning
+npm test             # unit tests (54): formulas, shot counters, CSV import, transfers, maintenance, compatibility, quality, stock, planning
 npm run test:e2e     # Phase 3a browser acceptance suite (31 checks) against a running app
 npm run test:e2e:3b  # Phase 3b suite (36 checks): transfers, disputes, triggers, work orders, quarantine, supplier
 npm run test:e2e:3c  # Phase 3c suite (34 checks): compatibility, qualification, evaluations, stock, planning, reports
 npm run test:e2e:3d  # Phase 3d suite (49 checks): API, webhooks, reconciliation, OIDC and SAML sign-in
 npm run test:e2e:inspection  # Calculated fields and guided inspections (35 checks)
+npm run test:e2e:downtime    # Downtime, MTBF/availability, import, API, scoping (48 checks)
 ```
 
 The 3d suite runs its own mock OIDC and SAML identity providers (ports 4455/4456) and a webhook receiver (4466). Start the app for it with `APP_URL=http://localhost:3000 WEBHOOK_ALLOW_HTTP=1 WEBHOOK_ALLOW_PRIVATE=1 SSO_SKIP_DOMAIN_VERIFICATION=1`. These three settings are for tests only and must not be set in production.
@@ -231,6 +253,7 @@ src/lib/planning*.ts          Shot rate, life forecast, budget rules, capacity (
 src/lib/reports.ts            Standard reports (shared by the pages and CSV export)
 src/lib/calc.pure.ts          Calculated fields (lifecycle and capacity) with missing-input diagnostics
 src/lib/inspection*.ts        Health rating, inspection templates, assessment rules
+src/lib/downtime*.ts          Downtime validation, MTBF / MTTR / availability (pure); codes, events, metrics queries
 src/lib/api*.ts               API keys, auth, scopes, rate limit, paging; JSON shapes
 src/lib/openapi.ts            OpenAPI document (also renders /developers)
 src/lib/ingest.ts             Readings and production ingestion shared by the API and CSV

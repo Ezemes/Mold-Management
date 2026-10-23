@@ -6,6 +6,7 @@ import { label } from "@/lib/labels";
 import { fmtDate, fmtMoney, fmtNum } from "@/lib/format";
 import { cx, FlashFromParams, PageHeader, Stat, Table, Td } from "@/components/ui";
 import { MaintTabs } from "@/components/maint-tabs";
+import { fmtDuration, loadMetrics } from "@/lib/downtime";
 
 export const metadata = { title: "Maintenance compliance" };
 
@@ -25,6 +26,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     db.asset.count({ where: { AND: [assetScope(ctx), { status: { notIn: ["retired", "scrapped"] } }] } }),
   ]);
   const m = maintenanceMetrics(wos, start, end, assetCount);
+  // MTBF and MTTR come from recorded downtime when there is any; otherwise they are estimated from corrective work orders.
+  const dt = ctx.can("downtime") ? await loadMetrics(ctx, start, end) : null;
+  const fromDowntime = !!dt && dt.eventCount > 0;
   const done = wos.filter((w) => w.status === "completed" && w.completedAt && w.completedAt >= start);
   const costs = done.map((w) => ({ w, c: woCost(w) }));
   const total = costs.reduce((s, x) => s + x.c.total, 0);
@@ -51,8 +55,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="PM compliance" value={pct(m.pmCompliancePct)} hint={`${m.pmOnTime} of ${m.pmDue} on time`} />
         <Stat label="Overdue now" value={m.overdue} hint="Open work past its due date" />
-        <Stat label="MTTR" value={m.mttrHours == null ? "—" : `${fmtNum(m.mttrHours, ctx.org, 1)} h`} hint="Corrective: raised → completed" />
-        <Stat label="MTBF" value={m.mtbfDays == null ? "—" : `${fmtNum(m.mtbfDays, ctx.org)} d`} hint={`${m.failures} failure(s) across ${assetCount} asset(s)`} />
+        {fromDowntime ? <Stat label="MTTR" value={fmtDuration(dt.total.mttrHours)} hint={<Link href="/downtime/reports" className="hover:underline">From downtime: {dt.total.repairs} repair(s)</Link>} /> : <Stat label="MTTR" value={m.mttrHours == null ? "—" : `${fmtNum(m.mttrHours, ctx.org, 1)} h`} hint="Corrective work orders: raised → completed" />}
+        {fromDowntime ? <Stat label="MTBF" value={fmtDuration(dt.total.mtbfHours)} hint={<Link href="/downtime/reports" className="hover:underline">From downtime: {dt.total.failures} failure(s), {dt.total.availabilityPct == null ? "—" : `${fmtNum(dt.total.availabilityPct, ctx.org, 1)}%`} available</Link>} /> : <Stat label="MTBF" value={m.mtbfDays == null ? "—" : `${fmtNum(m.mtbfDays, ctx.org)} d`} hint={`Corrective work orders: ${m.failures} across ${assetCount} asset(s)`} />}
         <Stat label="Maintenance spend" value={fmtMoney(total, ctx.org)} hint={`${done.length} completed · ${fmtNum(hours, ctx.org, 1)} h`} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
